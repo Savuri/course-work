@@ -1,0 +1,1257 @@
+# 3 перевода строки - разделение между объектами/событиями
+# 1 перевода строки разделение между артрибутами
+module 'Абстрактные модели'
+  attr target_object: 'система'
+
+object OS is 
+**OS** - объект, представляющий систему целиком
+end
+
+objattr os_open_file_table : OpenFile-set is
+**os_open_file_table** - таблица открытых файлов ОС. В этой таблице происходит регистрация всех открытых в системе файлов.
+end
+
+objattr os_files : File-set is
+**os_files** - множество всех файлов в файловой системе.
+end
+
+objattr os_proceses : Process-set is 
+**Proos_procesescesses** - множество процессов в системе.
+end
+
+objattr os_abstract_socket_namespace : Text -m-> Socket is
+**os_abstract_socket_namespace** - отображение адресса unix сокета (т.е. строки) в сокет с таким адресом.
+end
+
+objattr os_users : Uid-set is
+**os_users** - монжество всех пользователей, зарегистрированных в системе. (/etc/passwd)
+end
+
+objattr os_groups : Gid-set is
+**os_groups** - монжество всех пользователей, зарегистрированных в системе. (/etc/group)
+end
+
+endobject
+
+
+type Uid : Nat // численный индефикатор пользователя
+type Gid : Nat // численный индефикатор группы
+
+type Gids : Gid-set
+type Uids : Uid-set
+
+
+type Permission:
+enum
+    S_IRUSR                       
+    S_IWUSR                        
+    S_IXUSR                   
+    S_IRGRP
+    S_IWGRP
+    S_IXGRP
+    S_IROTH
+    S_IWOTH
+    S_IXOTH
+endtype
+
+
+type Permissions : Permission-set
+
+
+type Cred : struct
+{
+    Uid cr_uid;            // Real user id
+    Uid cr_euid;           // Effective user id
+    Uid cr_suid;           // saved effective user id.
+    Gid cr_gid;            // Real group id 
+    Gid cr_egid;           // effective group id
+    Gid cr_sgid;           // Saved effective group id
+    Int cr_ngroups;       // number of groups
+    Gids cr_groups;     // groups
+    Permissions cr_umask;    // umask
+}
+is
+**Cred** - структура, хранящая информацию о правах процесса
+endtype
+
+
+
+type Fcred : struct
+{
+    Uid fc_uid;
+    Gid fc_gid;
+    Permissions fc_permission;
+}
+endtype
+
+# Раздел сигналов - Beg
+type Handler
+type Handler3
+type Sigset : Nat-set
+type SignalFlag:
+enum
+    SA_RESETHAND //Restore  the  signal action to the default upon entry to the signal handler.  This flag is meaningful  only  when  establishing  a  signal handler.
+    SA_RESTART // Restart certain system call
+    SA_SIGINFO // The  signal handler takes three arguments, not one.  In this case, sa_sigaction should  be  set  instead  of  sa_handler. This flag is meaningful only when establishing a signal handler.
+endtype
+type SignalFlags : SignalFlag-set
+
+type Sigaction : struct
+{
+    Handler hand;
+    Handler3 sigact;
+    SignalFlags signal_flags; # Я сюда лезть не хочу((( пусть сигналы опишу поверхностно.
+    Sigset sigset;
+}
+endtype
+# Раздел сигналов - End
+
+object Process is
+**Process** - отдельный процесс ОС.
+end
+
+objattr proc_pid : Int is
+**proc_pid** - уникальный индефикатор процесса.
+end
+
+objattr proc_errno : Int is
+**proc_errno** устанавливается системные вызовом и некоторыми библиотечным фукнциями в случае возникновения ошибок.
+end
+
+objattr proc_fds : Nat -m-> Fd is 
+**proc_fds** - таблица открытых файловых дескрипторов процесса.
+end
+
+objattr proc_cred : Cred is
+**proc_cred** - информация о правах процесса
+end
+
+objattr proc_sigaction_array : Nat -m-> Sigaction is # sighand_struct === k_sigaction[_NSIG] === proc_sigaction_array
+**proc_sigaction_array** - обработчики. (описание сигналов не прикручивал)
+end
+
+objattr proc_pending_signals : Nat-list is // Это более расширеная структура с информацией о том от кого пришло и т.д. т.е. с полем 'siginfo_t info';
+**proc_pending_signals** - сигналы, пришедшие на обработку
+end
+
+objattr proc_blocked_signals : Sigset is // Nat есть здесь, если сигнал блокируется. В реальности это битовая маска, но я пока сигналы их номером описываю.
+**proc_blocked_signals** - блокированные сигналы
+end
+
+type ProcStatus:
+enum
+    R // running or runnable (on run queue)
+    S // interruptible sleep (waiting for an event to complete) (В этом состоянии процес при блокировке)
+is
+**ProcStatus** - перечислимый тип, содержащий статус текущего процесса
+$enumdefs$
+endtype
+
+objattr proc_status : ProcStatus is 
+**proc_status** - текущее состояние процесса
+end
+endobject
+
+
+
+object Fd is
+**Fd** - файловый дескриптор.
+end
+
+objattr fd_open_file_ref : OpenFile-ref is 
+**fd_open_file_ref** - ссылка на структура с информацией об открытом файле.
+end
+
+type FdFlag:
+enum
+    FD_CLOEXEC // close on exec
+is
+**FdFlag** - тип для флагов, которые приписаны к файловому дескриптору на уровне конкретного процесса.
+$enumdefs$
+endtype
+
+objattr fd_flags : FdFlag-set is # Хотя возможен только один
+**fd_flags** - флаги, которые приписаны к файловому дескриптору на уровне конкретного процесса.
+end
+endobject
+
+object File is
+**File** - inode. Объект содержащий метаинформацию о файлах, директориях и других объектах ФС.
+end
+
+objattr file_path : Text is
+**file_path** - Путь до файла
+end
+
+type FileType:
+enum
+    REGULAR_FILE_TYPE // обычный файл
+    DIRECTORY_TYPE    // директория
+    SYMLINK_TYPE      // символическая ссылка
+    SOCKET_TYPE       // сокет
+is 
+**FileType** - перечислимы тип, описывающий типы файлов.
+$enumdefs$
+endtype
+
+objattr file_type : FileType is
+**file_type** - тип файла.
+end
+
+objattr file_cred : Fcred is
+**file_cred** - Информация об обладателе и правах доступа
+end
+endobject
+
+
+
+object OpenFile is 
+**OpenFile** хранит информацию об открытом файле. Например такие данные, как флаги доступа, оступ в файле и т.д..
+end
+
+objattr of_op_type : FileType is
+**of_op_type** - операции определённые для этого типа. Этим хотелось выразить наличия поля op в стркутуре откртытого файла. Здесь он просто равен типу файлу.
+end
+
+objattr of_file : File-ref is
+**of_file** - артрибут **OpenFile**, который хранит ссылку на соотвестующий этому **OpenFile**, объект **File**.
+end
+
+objattr of_ref_cnt : Int is
+**of_ref_cnt** - число ссылающихся на эту запись файловых дескрипторов.
+end
+
+type OpenFileFlag :
+enum
+    O_RDONLY  // доступ на чтение
+    O_WRONLY  // доступ на запись
+    O_RDWR    // доступ и на чтение, и на запись
+    O_NONBLOCK  // запрет блокировки
+is
+**OpenFileType** перечисление флагов откртых файлов.
+
+$enumdefs$
+endtype
+
+objattr of_flags : OpenFileFlag-set is #note: смотри type OpenFileFlag 
+**of_flags** - флаги открытого файла. 
+end
+
+
+objattr of_indent : Int is #note: unsigned long если не ошибаюсь
+**of_indent** - отступ в открытом файле, с которым работают все read/write.
+end
+
+objattr of_private_data : Socket-ref is
+**of_private_data - ссылка на важные структура данных. (Здесь находится ссылка на структуру сокет).**
+end
+endobject
+
+
+
+object Socket is 
+**Socket** - объект представляющий собой UNIX сокет.
+end
+
+type SocketStatus:
+enum
+    FREE
+    UNCONNECTED
+    CONNECTING
+    CONNECTED
+    DISCONNECTING
+    LISTEN
+is
+**SocketStatus** - перечисление, в которых может находится сокет. 
+endtype
+
+objattr socket_status : SocketStatus is
+**socket_status** - текущий статус сокета
+end
+
+objattr socket_address : Text is
+**socket_address** - адрес сокета.
+end
+
+objattr socket_addrlen : Nat is
+**socket_addrlen** - длина адреса сокета.
+end
+
+objattr socket_queue : Socket-list is 
+**socket_queue** - очередь для accept.
+end
+
+objattr socket_backlog : Int is
+**socket_backlog** - длина очереди полностью настроенных сокетов, которые ждут принятия.
+end
+
+objattr socket_peer : Socket-ref is
+**socket_peer** - ссылка на сокета-друга, с котором б общение.
+end
+
+type SocketFlags: 
+enum
+       SO_ACCEPTCONN
+       SO_ATTACH_FILTER //(since Linux 2.2)
+       SO_ATTACH_BPF //(since Linux 3.19)
+       SO_ATTACH_REUSEPORT_CBPF
+       SO_ATTACH_REUSEPORT_EBPF
+       SO_BINDTODEVICE
+       SO_BROADCAST
+       SO_BSDCOMPAT // Уже не поддерживается
+       SO_DEBUG
+       SO_DETACH_FILTER //(since Linux 2.2)
+       SO_DETACH_BPF //(since Linux 3.19)
+       SO_DOMAIN
+       SO_ERROR
+       SO_DONTROUTE
+       SO_INCOMING_CPU //(gettable since Linux 3.19, settable since Linux 4.4)
+       SO_KEEPALIVE
+       SO_LINGER
+       SO_LOCK_FILTER
+       SO_MARK //(since Linux 2.6.25)
+       SO_OOBINLINE
+       SO_PASSCRED
+       SO_PASSSEC 
+       SO_PEEK_OFF //(since Linux 3.4)
+       SO_PEERCRED
+       SO_PRIORITY
+       SO_PROTOCOL //(since Linux 2.6.32)
+       SO_RCVBUF
+       SO_RCVBUFFORCE //(since Linux 2.6.14)
+       SO_RCVLOWAT
+       SO_SNDLOWAT
+       SO_RCVTIMEO
+       SO_SNDTIMEO
+       SO_REUSEADDR
+       SO_REUSEPORT// (since Linux 3.9)
+       SO_RXQ_OVFL //(since Linux 2.6.33)
+       SO_SNDBUF
+       SO_SNDBUFFORCE// (since Linux 2.6.14)
+       SO_TIMESTAMP
+       SO_TIMESTAMPNS
+       SO_TIMESTAMPING
+       SO_TYPE
+       SO_BUSY_POLL //(since Linux 3.11)
+is
+**SocketFlags** - перечесление флагов сокета.    
+end
+
+objattr socket_flags : SocketFlags-set is
+**socket_flags** - флаги сокета. Осуществлять управление этими флагами можно с помощью *setsockopt* и  *getsockopt*
+end
+
+type SockType: # Чтобы закинуть, к примеру SOCK_NONBLOCK и SOCK_STREAM в один set. Пусть будет один тип.
+enum
+    SOCK_STREAM
+    SOCK_DGRAM
+    SOCK_SEQPACKET
+    SOCK_RAW # SOCK_RAW то же самое что и SOCK_DGRAM
+    SOCK_RDM
+    SOCK_PACKET
+    SOCK_NONBLOCK
+    SOCK_CLOEXEC
+is
+**SockType** - перечисление типов сокетов.
+$enumdefs$
+endtype
+
+objattr socket_type : SockType is
+**socket_type** - тип сокета. (SOCK_STREAM, SOCK_DGRAM, SOCK_SEQPACKET)
+end
+
+type ShutdownFlags:
+enum
+    RCV_SHUTDOWN   // Сокет не может читать 
+    SEND_SHUTDOWN  // Сокет не может писать
+endtype
+
+objattr socket_shutdown_flags : ShutdownFlags-set is
+**socket_shutdown_flags** - флаги, обозначающие закрытие на операции чтения и записи, выполняемые этим сокетом. 
+end
+
+objattr socket_buf : Text is
+**socket_buf** - буффер сокета
+end
+
+type AddressFamily:
+enum
+    AF_UNIX // == AF_LOCAL
+    AF_UNSPEC
+is 
+**AddressFamily** - перечесление семейств адрессов. В данной модели рассматривается только *AF_UNIX*.  
+$enumdefs$
+endtype
+
+type Protocol:
+enum
+    PF_UNSPEC
+    PF_UNIX // == PF_LOCAL
+is
+**Protocol** - протоколы.
+
+$enumdefs$
+endtype
+endobject
+
+
+type Error: 
+enum
+    EACCES
+    EAFNOSUPPORT
+    EINVAL
+    EMFILE
+    ENFILE
+    ENOBUFS
+    ENOMEM
+    EPROTONOSUPPORT
+    EBADF
+    ENOTSOCK
+    EINVAL
+    EROFS
+    EFAULT
+    ENAMETOOLONG
+    ENOENT
+    ENOMEM
+    ENOTDIR
+    EACCES
+    ELOOP
+    ESOCKTNOSUPPORT
+    EADDRINUSE
+    EADDRNOTAVAIL
+    EOPNOTSUPP
+    EINTR
+    EIO
+    ENOSPC
+    EDQUOT
+is
+**Error** - перечисление всех кодов ошибок, которые могут возникать в событиях.
+endtype
+
+
+action add_to_fifo // Добавить элемент по стратегии fifo (очереди)
+params
+    T @TYPE
+    fifo @IN : T-list
+    el   @IN : T
+function 
+    
+    fifo(\len fifo) := el
+end
+
+
+
+logical get_from_fifo // Взять элемент по стратегии fifo (очереди)
+params
+    T    @TYPE
+    fifo @IN  : T-list
+    el   @OUT : T
+function
+
+end
+
+
+
+action add_to_set
+params
+  T     @TYPE
+  set1  @IN    : T-set
+  el    @IN    : T
+function
+  set1 := set1 ∪ {. el .} // !Добавить el в set1
+end
+
+
+
+action remove_from_set
+params
+  T    @TYPE
+  set1 @IN   : T-set
+  el   @IN   : T
+function
+  set1 := set1 \diff el
+end 
+
+
+
+logical get_sock_data // !get socket private data of fd_num for current procces 
+params
+    current @IN  : Process
+    sockfd  @IN  : Nat
+    sock    @OUT : Socket
+function
+    return current.proc_fds(sockfd).fd_open_file_ref.of_private_data 
+end
+
+
+
+logical get_open_file
+params
+    current @IN  : Process
+    fd      @IN  : Nat
+    of      @OUT : OpenFile
+function
+    return \deref current.proc_fds(fd).fd_open_file_ref
+end
+
+action add_to_map
+params
+  T1    @TYPE
+  T2    @TYPE
+  map   @IN    : T1 -m-> T2
+  key   @IN    : T1
+  el    @IN    : T2
+function
+    map(key) := el // !Добавить el в map с ключом key
+end
+
+
+
+action remove_from_map
+params
+  T1  @TYPE
+  T2  @TYPE
+  map @IN : T1 -m-> T2
+  key @IN : T1
+function
+    * Удалить элемент key из map
+end
+    
+
+
+const POSSIBLE_SOCKET_TYPES : SockType-set-set // Множество корректных типов сокета. Тип сокета (SOCK_STREAM, SOCK_DGRAM, SOCK_RDM etc), и (опционально) флаги SOCK_NONBLOCK или SOCK_CLOEXEC. Т.е. либо тройка, либо двойка, либо только тип сокета (SOCK_STREAM etc).
+const MAX_FDS_PER_PROC : Nat // Максимальное число файловых дескрипторов для одного процесса
+const MAX_OPEN_FILES   : Nat // Максимальное число открытых файлов в системе. Это число может быть найдено, например, в файле /proc/sys/fs/file-max
+
+
+
+event socket // socket
+params
+    os        @IN  : OS
+    current   @IN  : Process
+    domain    @IN  : AddressFamily
+    sock_type @IN  : SockType-set
+    protocol  @IN  : Protocol
+    fd        @OUT : Int
+invariant domain == AF_UNIX // Модель только для UNIX сокетов
+invariant current \isin os.os_proceses // Текущей процесс существует в рамках системы
+function
+    forany(newFD : Nat | newFD \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD) => nn \isin \dom(current.proc_fds)) {
+        #mk_Fd()
+        #openfile = mk_OpenFile()
+        #socket = mk_Socket()
+        
+        if (SOCK_CLOEXEC \isin sock_type) {
+            current.proc_fds(newFD).fd_flags := {. FD_CLOEXEC .}
+        }
+        
+        openfile = get_open_file(current, fd)
+        socket = get_sock_data(current, fd)
+            
+        openfile.of_flags := {. O_RDWR .} 
+            
+        if (SOCK_NONBLOCK \isin sock_type) {
+            add_to_set(openfile.of_flags, O_NONBLOCK)
+        }
+            
+        socket.socket_status := UNCONNECTED
+        openfile.of_op_type := SOCKET_TYPE
+            
+        if (SOCK_DGRAM \isin sock_type) {
+            socket.socket_type := SOCK_DGRAM
+        } elif (SOCK_STREAM \isin sock_type) {
+            socket.socket_type := SOCK_STREAM
+        } elif (SOCK_SEQPACKET \isin sock_type) {
+           socket.socket_type := SOCK_SEQPACKET
+        }
+            
+        return newFD
+    }
+end
+
+
+
+type Sockaddr_un : struct
+{
+    AddressFamily sun_family;
+    Text sun_path;
+}
+is
+**Sockaddr_un** - соотвествующая си структура, которая передаётся, например, в *bind*.
+endtype
+
+
+
+const PATH_MAX : Nat // Maximum path size in system
+
+
+
+event bind // bind
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    sockaddr @IN  : Sockaddr_un
+    addrlen  @IN  : Nat
+    ret      @OUT : Int
+function # addrlen поработать. Понятно что этот параметр нужен для контроля за памятью для ядра. В модели как его использование описать.
+    if (sockaddr.sun_path(0) != '\0') { # Обычный сокет
+        # создать новый файл
+        forany (newFile : File | newFile.file_path = sockaddr.sun_path && newFile.file_type == SOCKET_TYPE) {
+            add_to_set(os.os_files, newFile) // Создаётся новый файл
+            current.proc_fds(sockfd).fd_open_file_ref.of_file := newFile // сокет связывается с созданным файлом
+            #TODO: user, group, permission...?
+        }
+    } else { # Абстрактный сокет
+        add_to_map(os.os_abstract_socket_namespace, sockaddr.sun_path, current.proc_fds(sockfd).fd_open_file_ref.of_private_data) // связать абстрактный сокет 
+    }
+    
+    current.proc_fds(sockfd).fd_open_file_ref.of_private_data.socket_address := sockaddr.sun_path
+    current.proc_fds(sockfd).fd_open_file_ref.of_private_data.socket_addrlen := addrlen
+    
+    return 0
+end
+
+#TODO fix sockfd input from Nat to Int
+
+const SOMAXCONN : Nat // значение в /proc/sys/net/core/somaxconn файле
+
+
+
+event listen // listen
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    backlog  @IN  : Int
+    ret      @OUT : Int
+function
+    socket = get_sock_data(current, sockfd)
+
+    if (backlog > SOMAXCONN) {
+        socket.socket_backlog := SOMAXCONN
+    } else {
+        socket.socket_backlog := backlog
+    }
+    
+    socket.socket_status := LISTEN
+        
+    return 0
+end
+
+
+
+#If a blocked call to one of the following interfaces is
+#interrupted by a signal handler, then the call is automatically
+#restarted after the signal handler returns if the SA_RESTART flag
+#was used; otherwise the call fails with the error EINTR:
+
+#read, write, Socket interfaces: accept(2), connect(2), recv(2), recvfrom(2),
+#recvmmsg(2), recvmsg(2), send(2), sendto(2), and sendmsg(2),
+#unless a timeout has been set on the socket (see below).
+
+#The following interfaces are never restarted after being
+#interrupted by a signal handler, regardless of the use of
+#SA_RESTART; they always fail with the error EINTR when
+#interrupted by a signal handler:
+
+#* "Input" socket interfaces, when a timeout (SO_RCVTIMEO) has
+#been set on the socket using setsockopt(2): accept(2), recv(2),
+#recvfrom(2), recvmmsg(2) (also with a non-NULL timeout
+#argument), and recvmsg(2).
+
+#"Output" socket interfaces, when a timeout (SO_RCVTIMEO) has
+#been set on the socket using setsockopt(2): connect(2),
+#send(2), sendto(2), and sendmsg(2).
+event connect // systemcall connect
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    sockaddr @IN  : Sockaddr_un
+    addrlen  @IN  : Nat
+    ret      @OUT : Int 
+function
+#If possible we block in connect(2) if the max backlog of the listen socket is been reached. This won't break
+#old apps and it will avoid huge amount of socks hashed (this for unix_gc() performances reasons).
+    socket = get_sock_data(current, sockfd)
+    
+    forany(OF : OpenFile | OF \isin os.os_open_file_table && OF.of_private_data.socket_address == sockaddr.sun_path) {//Нашли сокет-друга
+        socket.socket_status := CONNECTING
+        peer = OF.of_private_data
+        
+        if (socket.socket_type == SOCK_STREAM || socket.socket_type == SOCK_SEQPACKET) {
+            
+            socket.socket_status := CONNECTING
+            add_to_fifo(peer.socket_queue, socket) 
+            current.proc_status := S
+            wait INFWAIT {
+                trigger (peer.socket_queue != <..>) { // текст для триггера 1
+                      socket.socket_status := CONNECTED
+                      socket.socket_peer := OF.of_private_data
+                      current.proc_status := R
+                }
+                
+                trigger (current.proc_pending_signals != <..>) { // текст для триггера 2
+                     signum = current.proc_pending_signals(0)
+                     current.proc_status := R
+                     #TODO: signal handling
+                     if (SA_RESTART \isin current.proc_sigaction_array(signum).signal_flags && SO_RCVTIMEO \isin socket.socket_flags) {
+                         current.proc_errno := EINTR
+                         return -1
+                     } elif (SA_RESTART \isin current.proc_sigaction_array(signum).signal_flags && SO_RCVTIMEO \notisin socket.socket_flags){
+                    
+                        #TODO: RESTART system call -- Здесь ничего не требуется это точно тоже самое. Дополнить эту часть в logical
+                    } else {
+                        current.proc_errno := EINTR
+                        return -1
+                    }
+               }
+            }
+        } else {
+            socket.socket_peer := OF.of_private_data
+        }
+    }
+
+    return 0    
+end
+
+
+
+event accept // accept
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    sockaddr @IN  : Sockaddr_un
+    addrlen  @IN  : Nat-ref
+    ret      @OUT : Int
+function
+    socket = get_sock_data(current, sockfd)
+   
+    if (socket.socket_queue == <..>) {// Очередь пуста. Мероприятия по ожиданию
+        current.proc_status := S
+        
+        wait INFWAIT { 
+            trigger (socket.socket_queue != <..>) { // текст для триггера 1
+                peer_socket = get_from_fifo(socket.socket_queue) // Тот кто подсоединяется
+                forany(newFD : Nat | newFD \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD) => nn \isin \dom(current.proc_fds)) { // Создаются fd, OpenFile, Socket. Причём все поля у новых OpenFile и Socket такие же, как и у этих же объектов соотвестующих sockfd. 
+                    current.proc_status := R
+                    new_socket = get_sock_data(current, newFD)
+                    
+                    new_socket.socket_peer  := peer_socket
+                    peer_socket.socket_peer := new_socket
+                    
+                    new_socket.socket_status  := CONNECTED
+                    peer_socket.socket_status := CONNECTED
+                    
+                    sockaddr.sun_family := AF_UNIX
+                    sockaddr.sun_path   := peer_socket.socket_address
+                    \deref(addrlen) := peer_socket.socket_addrlen
+                    
+                    return newFD
+                } 
+            }
+            
+            trigger (current.proc_pending_signals != <..>) { // текст для триггера 22
+                signum = current.proc_pending_signals(0)
+                #TODO: signal handling
+                if (SA_RESTART \isin current.proc_sigaction_array(signum).signal_flags && SO_RCVTIMEO \isin socket.socket_flags) {
+                    current.proc_errno := EINTR
+                    current.proc_status := R
+                        
+                    return -1
+                } elif (SA_RESTART \isin current.proc_sigaction_array(signum).signal_flags && SO_RCVTIMEO \notisin socket.socket_flags){
+                    current.proc_status := R
+                    #TODO: RESTART system call
+                } else {
+                    current.proc_errno := EINTR
+                    current.proc_status := R
+                       
+                    return -1
+                }
+            }
+        }            
+       
+    }
+end
+
+
+
+event close
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    fd       @IN  : Nat
+    ret      @OUT : Int
+invariant
+    current.proc_fds(fd).fd_open_file_ref.of_ref_cnt >= 1 // Если у файла ref_cnt == 0, то его в этой таблице быть не должно
+function    
+    open_file = current.proc_fds(fd).fd_open_file_ref
+    open_file.of_ref_cnt--
+
+    remove_from_map(current.proc_fds, fd)
+ 
+    if (open_file.of_ref_cnt == 0) {
+        remove_from_set(os.os_open_file_table, \deref(open_file))
+    }
+    
+    return 0
+end
+
+
+type ShutdownParam:
+enum
+    SHUT_RD
+    SHUT_WR
+    SHUT_RDWR
+is
+**ShutdownParam** - перечисление возможных значений параметра *how* в систменов вызове *shutdown*
+endtype
+
+
+
+event shutdown // shutdown
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    how      @IN  : ShutdownParam
+    ret      @OUT : Int
+function
+    peer = get_sock_data(current, sockfd).socket_peer
+
+    if (how == SHUT_RD) {
+        add_to_set(peer.socket_shutdown_flags, SEND_SHUTDOWN)  
+    } elif (how == SHUT_WR) {
+        add_to_set(peer.socket_shutdown_flags, RCV_SHUTDOWN)
+    } elif (how == SHUT_RDWR) {
+        add_to_set(peer.socket_shutdown_flags, SEND_SHUTDOWN)
+        add_to_set(peer.socket_shutdown_flags, RCV_SHUTDOWN)
+    }
+    
+    return 0    
+end
+
+
+
+event socketpair // socketpair
+params
+    os        @IN  : OS
+    current   @IN  : Process
+    domain    @IN  : AddressFamily
+    sock_type @IN  : SockType-set
+    protocol  @IN  : Protocol-set
+    fds       @IN  : Nat -m-> Nat
+    fd        @OUT : Int
+function
+    forany(newFD1 : Nat | newFD1 \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD1) => nn \isin \dom(current.proc_fds)) {
+        forany(newFD2 : Nat | newFD2 \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD2) => nn \isin \dom(current.proc_fds)) {
+           if (SOCK_CLOEXEC \isin sock_type) {
+                current.proc_fds(newFD1).fd_flags := {. FD_CLOEXEC .}
+                current.proc_fds(newFD2).fd_flags := {. FD_CLOEXEC .}
+            }
+            
+            openfile1 = get_open_file(current, newFD1)
+            openfile2 = get_open_file(current, newFD2)
+            
+            socket1 = get_sock_data(current, newFD1)
+            socket2 = get_sock_data(current, newFD2)
+              
+            openfile1.of_flags := {. O_RDWR .} 
+            openfile2.of_flags := {. O_RDWR .}
+            
+            openfile1.of_op_type := SOCKET_TYPE
+            openfile1.of_op_type := SOCKET_TYPE
+                
+            if (SOCK_NONBLOCK \isin sock_type) {
+                add_to_set(openfile1.of_flags, O_NONBLOCK)
+                add_to_set(openfile2.of_flags, O_NONBLOCK)
+            }
+                
+            socket1.socket_status := CONNECTED
+            socket2.socket_status := CONNECTED
+            
+            socket1.socket_peer := socket2
+            socket2.socket_peer := socket1
+            
+            if (SOCK_DGRAM \isin sock_type) {
+                socket1.socket_type := SOCK_DGRAM
+                socket2.socket_type := SOCK_DGRAM
+            } elif (SOCK_STREAM \isin sock_type) {
+                socket1.socket_type := SOCK_STREAM
+                socket2.socket_type := SOCK_STREAM
+            } elif (SOCK_SEQPACKET \isin sock_type) {
+                socket1.socket_type := SOCK_SEQPACKET
+                socket2.socket_type := SOCK_SEQPACKET
+            }
+            
+            fds(0) := newFD1
+            fds(1) := newFD2
+            
+            return 0
+        }
+    }
+
+end
+
+
+
+type Level:
+enum
+    SOL_SOCKET
+is
+**SOL_SOCKET** - опции для всех сокетов или опции только юниксовых соектов
+end
+
+
+
+event getsockopt
+params
+    os      @IN  : OS
+    current @IN  : Process
+    sockfd  @IN  : Nat
+    level   @IN  : Level
+    optname @IN  : SocketFlags
+    optval  @IN  : void*
+    optlen  @IN  : Nat-ref
+    ret     @OUT : Int
+function
+    if (optname == SO_ACCEPTCONN) {
+        
+    } elif (optname == SO_ATTACH_FILTER) {
+    } elif (optname == SO_ATTACH_BPF) {
+    } elif (optname == SO_ATTACH_REUSEPORT_CBPF) {
+    } elif (optname == SO_ATTACH_REUSEPORT_EBPF) {
+    } elif (optname == SO_BINDTODEVICE) {
+    } elif (optname == SO_BROADCAST) {
+    } elif (optname == SO_BSDCOMPAT) {
+        # Я умер в новых версиях
+    } elif (optname == SO_DEBUG) {
+    } elif (optname == SO_DETACH_FILTER) {
+    } elif (optname == SO_DETACH_BPF) {
+    } elif (optname == SO_DOMAIN) {
+    } elif (optname == SO_ERROR) {
+    } elif (optname == SO_DONTROUTE) {
+    } elif (optname == SO_INCOMING_CPU) {
+    } elif (optname == SO_KEEPALIVE) {
+    } elif (optname == SO_LINGER) {
+        # Особый челик
+    } elif (optname == SO_LOCK_FILTER) {
+    } elif (optname == SO_MARK) {
+    } elif (optname == SO_OOBINLINE) {
+    } elif (optname == SO_PASSCRED) {
+    } elif (optname == SO_PASSSEC) {
+    } elif (optname == SO_PEEK_OFF) {
+    } elif (optname == SO_PEERCRED) {
+    } elif (optname == SO_PRIORITY) {
+    } elif (optname == SO_PROTOCOL) {
+    } elif (optname == SO_RCVBUF) {
+    } elif (optname == SO_RCVBUFFORCE) {
+    } elif (optname == SO_RCVLOWAT) {
+        #Особоый
+    } elif (optname == SO_SNDLOWAT) {
+    } elif (optname == SO_RCVTIMEO) {
+    } elif (optname == SO_SNDTIMEO) {
+    } elif (optname == SO_REUSEADDR) {
+    } elif (optname == SO_REUSEPORT) {
+    } elif (optname == SO_RXQ_OVFL) {
+    } elif (optname == SO_SNDBUF) {
+    } elif (optname == SO_SNDBUFFORCE) {
+    } elif (optname == SO_TIMESTAMP) {
+    } elif (optname == SO_TIMESTAMPNS) {
+    } elif (optname == SO_TYPE) {
+    } elif (optname == SO_BUSY_POLL) {
+    } elif (optname == SO_TIMESTAMPING) {
+     # Особый + неожиданный челик
+    }
+    
+    return 0
+end
+
+
+
+event setsockopt
+params
+    os      @IN  : OS
+    current @IN  : Process
+    sockfd  @IN  : Nat
+    level   @IN  : Level
+    optname @IN  : SocketFlags
+    optval  @IN  : void*
+    optlen  @IN  : Nat
+    ret     @OUT : Int
+function
+    #if (optname == SO_ACCEPTCONN) - не settable
+    if (optname == SO_ATTACH_FILTER) {
+    } elif (optname == SO_ATTACH_BPF) {
+    } elif (optname == SO_ATTACH_REUSEPORT_CBPF) {
+    } elif (optname == SO_ATTACH_REUSEPORT_EBPF) {
+    } elif (optname == SO_BINDTODEVICE) {
+    } elif (optname == SO_BROADCAST) {
+    } elif (optname == SO_BSDCOMPAT) {
+        # Я умер в новых версиях
+    } elif (optname == SO_DEBUG) {
+    } elif (optname == SO_DETACH_FILTER) {
+    } elif (optname == SO_DETACH_BPF) {
+    } elif (optname == SO_DOMAIN) {
+    } elif (optname == SO_ERROR) {
+    } elif (optname == SO_DONTROUTE) {
+    } elif (optname == SO_INCOMING_CPU) {
+    } elif (optname == SO_KEEPALIVE) {
+    } elif (optname == SO_LINGER) {
+        # Особый челик
+    } elif (optname == SO_LOCK_FILTER) {
+    } elif (optname == SO_MARK) {
+    } elif (optname == SO_OOBINLINE) {
+    } elif (optname == SO_PASSCRED) {
+    } elif (optname == SO_PASSSEC) {
+    } elif (optname == SO_PEEK_OFF) {
+    } elif (optname == SO_PEERCRED) {
+    } elif (optname == SO_PRIORITY) {
+    } elif (optname == SO_PROTOCOL) {
+    } elif (optname == SO_RCVBUF) {
+    } elif (optname == SO_RCVBUFFORCE) {
+    } elif (optname == SO_RCVLOWAT) {
+        #Особоый
+    } elif (optname == SO_SNDLOWAT) {
+    } elif (optname == SO_RCVTIMEO) {
+    } elif (optname == SO_SNDTIMEO) {
+    } elif (optname == SO_REUSEADDR) {
+    } elif (optname == SO_REUSEPORT) {
+    } elif (optname == SO_RXQ_OVFL) {
+    } elif (optname == SO_SNDBUF) {
+    } elif (optname == SO_SNDBUFFORCE) {
+    } elif (optname == SO_TIMESTAMP) {
+    } elif (optname == SO_TIMESTAMPNS) {
+    } elif (optname == SO_TYPE) {
+    } elif (optname == SO_BUSY_POLL) {
+    } elif (optname == SO_TIMESTAMPING) {
+     # Особый + неожиданный челик
+    }
+    
+    
+    return 0
+end
+
+
+
+type MsgFlags:
+enum
+    MSG_CONFIRM
+    MSG_DONTROUTE
+    MSG_DONTWAIT
+    MSG_EOR
+    MSG_MORE
+    MSG_NOSIGNAL
+    MSG_OOB
+is
+*MsgFlgas* - тип всех флагов для функций sendto, recvfrom
+endtype
+
+
+
+event sendto //sendto
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    buf      @IN  : void*
+    len      @IN  : Nat
+    flags    @IN  : MsgFlags-set
+    dst      @IN  : Sockaddr_un
+    addrlen  @IN  : Nat
+    ret      @OUT : Int    
+function
+     
+end
+
+
+
+event recvfrom //sendto
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    buf      @IN  : void*
+    len      @IN  : Nat
+    flags    @IN  : Nat-set #TODO
+    src      @IN  : Sockaddr_un
+    addrlen  @IN  : Nat
+    ret      @OUT : Int  
+function
+end
+
+
+
+event read // read
+params
+    os      @IN  : OS
+    current @IN  : Process
+    fd      @IN  : Nat
+    buf     @IN  : void* # void *buf
+    count   @IN  : Nat  
+    ret     @OUT : Int
+function
+
+end
+
+
+event write // write
+params
+    os      @IN  : OS
+    current @IN  : Process
+    fd      @IN  : Nat
+    buf     @IN  : void* # void *buf
+    count   @IN  : Nat  
+    ret     @OUT : Int
+function
+
+end
+
+
+
+event getpeername
+params
+    os      @IN  : OS
+    current @IN  : Process
+    sockfd  @IN  : Nat
+    address @IN  : Sockaddr_un-ref
+    addrlen @IN  : Nat-ref
+    ret     @OUT : Int
+function
+    socket = get_sock_data(current, sockfd)
+
+    if (\deref(addrlen) > socket_addrlen) {
+        \deref(address) := socket.socket_peer.socket_address
+    } else { // Buffer is too small
+        \deref(address) := 0 // Truncate address 
+        # Ошибочная ситуация?       
+    }
+    
+    \deref(addrlen) := socket_addrlen
+    
+    return 0
+end
+
+
+
+event getsockname
+params
+    os      @IN  : OS
+    current @IN  : Process
+    sockfd  @IN  : Nat
+    address @IN  : Sockaddr_un-ref
+    addrlen @IN  : Nat-ref
+    ret     @OUT : Int
+function
+    socket = get_sock_data(current, sockfd)
+
+    if (\deref(addrlen) > socket_addrlen) {
+        \deref(address) := socket.socket_address
+    } else { // Buffer is too small
+        \deref(address) := 0 // Truncate address        
+    }
+    
+    \deref(addrlen) := socket_addrlen
+    
+    return 0
+end
+
+#TODO: Пересмотреть Nat... в fd
+#TODO: Autobind feature
+
+type RequstedAccessType:
+enum
+    READ
+    WRITE
+    EXEC
+endtype
+
+
+
+logical groupmember
+params
+    gid   @IN  : Gid
+    cred  @IN  : Cred
+    ret   @OUT : Bool
+function
+    if (gid == cred.cr_egid) {
+        return True
+    } else {
+        forany(group : Gid | group \isin cred.cr_groups) {
+            if (group == gid) {
+                return True
+            } else {
+                return False
+            }
+        }
+    }
+end
+
+# На самом деле я пока не понимаю как файл типа сокет реагирует на доступ на чтение, запись, исполнение. 
+# Но мне это и не нужно описывать. Достаточно просто описать описать проверку директорий на EXEC и сокета на WRITE в нужном месте.
+logical access
+params
+    os          @IN  : OS
+    current     @IN  : Process
+    access_type @IN  : RequstedAccessType
+    file        @IN  : File
+    ret         @OUT : Bool
+function
+    cred = current.proc_cred
+    fcred = file.file_cred
+    ftype = file.file_type
+    
+    if (cred.cr_euid == 0) {
+        return ((access_type == EXEC) && ftype != DIRECTORY_TYPE && (fcred.fc_permission \intersect {. S_IXUSR, S_IXGRP, S_IXOTH .} != {. .}))
+    } else {       
+        if (cred.cr_euid == fcred.fc_uid) {
+            if (access_type == EXEC) {
+                mask = {. S_IXUSR .}
+            } elif (access_type == READ) {
+                mask = {. S_IRUSR .}
+            } elif (access_type == WRITE) {
+                mask = {. S_IWUSR .}
+            }
+        } elif (groupmember(fcred.fc_gid, cred)) {
+            if (access_type == EXEC) {
+                mask = {. S_IXGRP .}
+            } elif (access_type == READ) {
+                mask = {. S_IRGRP .}
+            } elif (access_type == WRITE) {
+                mask = {. S_IWGRP .}
+            }
+        } else {
+            if (access_type == EXEC) {
+                mask = {. S_IXGRP .}
+            } elif (access_type == READ) {
+                mask = {. S_IRGRP .}
+            } elif (access_type == WRITE) {
+                mask = {. S_IWGRP .}
+            }
+        }
+        
+        return (fcred.fc_permission \intersect mask) == mask
+    }
+end
+
+
+
+logical access_to_write
+params
+    file    @IN  : Text
+    res     @OUT : Bool
+function
+    
+    
+    return True
+end
+
+
+note 'OBJTREE_NOTE' is
+@objtree[root:OS]@
+endnote
+
+endmodule
+
