@@ -1000,7 +1000,7 @@ function
     } elif (optname == SO_INCOMING_CPU) {
     } elif (optname == SO_KEEPALIVE) {
     } elif (optname == SO_LINGER) {
-        # Особый челик
+        # Особый
     } elif (optname == SO_LOCK_FILTER) {
     } elif (optname == SO_MARK) {
     } elif (optname == SO_OOBINLINE) {
@@ -1027,7 +1027,7 @@ function
     } elif (optname == SO_TYPE) {
     } elif (optname == SO_BUSY_POLL) {
     } elif (optname == SO_TIMESTAMPING) {
-     # Особый + неожиданный челик
+     # Особый
     }
     
     
@@ -1243,9 +1243,7 @@ params
     file    @IN  : Text
     res     @OUT : Bool
 function
-    
-    
-    return True
+
 end
 
 
