@@ -249,6 +249,20 @@ endobject
 
 
 
+type sk_buff : struct 
+{
+    Text buf_data;
+    Nat consumed;
+    Nat data_len;
+    Text buf_control_data;
+    Nat control_len;
+}
+is
+**sk_buff** - данные внутри каждого буффера. Для *SOCK_DGRAM* и *SOCK_SEQPACKET*, можно сказать, предстваляет получаемую датаграмму. Для *SOCK_STREAM* буфферы будут читаться последовательно, отмечая уже прочитанные данные, учёт которых происходит в *consumed*. При *consumed* == *len* 
+endtype
+
+
+
 object Socket is 
 **Socket** - объект представляющий собой UNIX сокет.
 end
@@ -370,8 +384,20 @@ objattr socket_shutdown_flags : ShutdownFlags-set is
 **socket_shutdown_flags** - флаги, обозначающие закрытие на операции чтения и записи, выполняемые этим сокетом. 
 end
 
-objattr socket_buf : Text is
-**socket_buf** - буффер сокета
+objattr socket_buf : sk_buff-list is
+**socket_buf_list** - буффер сокета
+end
+
+objattr socket_buf_len : Nat is
+**socket_buf_len** - количество sk_buff в списке socket_buf.
+end
+
+objattr socket_so_sndbuf : Nat is
+**socket_so_buff** - размер буффера сокета. Значение, получаемое getsockopt() с SO_SNDBUF
+end
+
+objattr socket_used_buffer : Nat is
+**socket_used_buffer** - уже использованные размер буффера.
 end
 
 type AddressFamily:
@@ -429,13 +455,12 @@ is
 endtype
 
 
-action add_to_fifo // Добавить элемент по стратегии fifo (очереди)
+action add_to_list // Добавить элемент по стратегии fifo (очереди)
 params
     T @TYPE
     fifo @IN : T-list
     el   @IN : T
 function 
-    
     fifo(\len fifo) := el
 end
 
@@ -683,7 +708,7 @@ function
         if (socket.socket_type == SOCK_STREAM || socket.socket_type == SOCK_SEQPACKET) {
             
             socket.socket_status := CONNECTING
-            add_to_fifo(peer.socket_queue, socket) 
+            add_to_list(peer.socket_queue, socket) 
             current.proc_status := S
             wait INFWAIT {
                 trigger (peer.socket_queue != <..>) { // текст для триггера 1
@@ -729,8 +754,10 @@ params
 function
     socket = get_sock_data(current, sockfd)
    
+   
     if (socket.socket_queue == <..>) {// Очередь пуста. Мероприятия по ожиданию
         current.proc_status := S
+        
         
         wait INFWAIT { 
             trigger (socket.socket_queue != <..>) { // текст для триггера 1
@@ -1051,6 +1078,165 @@ endtype
 
 
 
+logical interrupt_logical
+params
+    pre_state  @IN  : Universe
+    post_state @IN  : Universe
+    current    @IN  : Process 
+    res        @OUT : Bool
+function
+    //TODO
+end 
+
+
+
+type iovec : struct {
+    void* iov_base;
+    Nat iov_len;
+}
+is
+**iovec** - iovec для msghndr
+endtype
+
+type ioveclist : iovec-list
+
+type msghdr : struct {
+    void*     msg_name;
+    Nat       msg_namelen;
+    ioveclist msg_iov;
+    Nat       msg_iovlen;
+    void*     msg_control;
+    Nat       msg_controllen;
+    Int       msg_flags;
+}
+is
+**msghdr** - структура для sendmsg/recvmsg
+endtype
+
+
+
+logical find_other
+params
+    sock_addr @IN  : void*
+    sock      @OUT : Socket
+function 
+    //Находит сокет в системе по адрессу.
+end
+
+
+
+logical msg_max_queue # Я не знаю как это получить. Оно зависит от SO_SNDBUF текущего сокета => Параметр - сокет-отправитель
+params
+    sock @IN  : Socket
+    ret  @OUT : Nat
+function
+    // Как-то связано с so_sndbuf. Как это посчитать не знаю
+end
+
+
+
+logical get_msg_len
+params
+    msg @IN  : msghdr
+    res @OUT : Nat
+function
+    // сумма компонентов iovec
+end
+
+
+
+logical mk_msg
+params
+    prm1 @IN  : Text
+    ret  @OUT : msghdr
+function
+    // Создаёт и инициализирует msghdr согласно prm1
+end  
+
+
+
+logical load_data_to_buff
+params
+    msg @IN  : msghdr 
+    buf @OUT : sk_buff
+function
+    // 1) Создаётся sk_buff. Отмечается изменение использованного пространства буффера данного сокета (so_sndbuff)
+    // 2) Данные просматриваются последовательно и загружаются подряд
+    // 3) Устанавливается размер данных поле data_len
+    // 4) Если есть загружаются дополнительные данные (если их нет, то буффер == 0)
+    // 5) Устанавливается размер дополнительных данных
+end
+
+
+
+logical get_data_from_buff
+params
+    buf @IN  : sk_buff
+    msg @OUT : msghdr
+function
+    // 1) Создаётся msghdr. 
+    // 2) В буферры iovec загружаются данные из buf_data
+    // 3) Если сокет dgram или seq, то дополнительные данные копируются. Если stream, то если после чтения некторого числа данных получилось, что used ==  data_len, то скопируются и дополнительные данные. Дальнейшее чтение прекращается.
+    // 4) Устанавливается размер дополнительных данных
+    //   
+end
+
+
+
+
+
+
+action sendmsg_generic // TODO event->action
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    msg      @IN  : msghdr
+    flags    @IN  : MsgFlags-set
+    ret      @OUT : Int
+function
+    socket = get_sock_data(current, sockfd)
+    other = find_other(msg.msg_name)
+    
+    
+    if (other.socket_buf_len == msg_max_queue(socket) || socket.socket_so_sndbuf + get_msg_len(msg) >= socket.socket_so_sndbuf) { // some text
+        current.proc_status := S
+        wait INFWAIT {
+            trigger (other.socket_buf_len < msg_max_queue(socket) || get_msg_len(msg) < socket.socket_so_sndbuf / 2 - socket.socket_used_buffer) {//сообщение для тригерра 1
+                socket_buff = load_data_to_buff(msg)
+                add_to_list(other.socket_buf, socket_buff)
+                other.socket_buf_len := other.socket_buf_len + 1
+            }
+            
+            trigger (interrupt_logical(current)) { // сообщение для триггера 2
+                #TODO irq handling   
+            }
+        }
+    }
+    
+    
+    socket.socket_peer := other
+    return 0
+end
+
+
+#For datagram-oriented Unix Domain Socket, setting the SO_SNDBUF socket option has an effect, but the SO_RCVBUF option does not (manpage unix(7)). And even the buffer is big enough, we can still experience the packet overflow problem. That is because there is another limitation in the datagram type Unix Domain Socket. The backlog of the packets in the buffer is not unlimited. For example, the default value of the maximum backlog in most Linux systems is set to 10, i.e. only 10 packets can wait in the queue. The commands to check and increase the backlog limit are:
+#        cat /proc/sys/net/unix/max_dgram_qlen
+#        sysctl -w net.unix.max_dgram_qlen=128 
+# У меня на машине тоже 10. Но в cat /proc/sys/net/unix/max_dgram_qlen не 10. Я не понимаю как это работает...
+#fs.mqueue.msg_default. Нашёл
+event sendmsg
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    msg      @IN  : msghdr
+    flags    @IN  : MsgFlags-set
+    ret      @OUT : Int
+function 
+    sendmsg_generic(os, current, sockfd, msg, flags)
+end
+
 event sendto //sendto
 params
     os       @IN  : OS
@@ -1063,7 +1249,44 @@ params
     addrlen  @IN  : Nat
     ret      @OUT : Int    
 function
-     
+    msg = mk_msg("msg_name = dst.address, msg_name_len = addrlen, ioveclist = &{buf, len}, msg_control = 0, msg_controllen = 0, msg_flags = flags")
+    
+    sendmsg_generic(os, current, sockfd, msg, flags)
+end
+
+
+
+event send // send
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    buf      @IN  : void*
+    len      @IN  : Nat
+    flags    @IN  : MsgFlags-set
+    ret      @OUT : Int
+function
+    #socket = get_sock_data(sockfd)
+    
+    msg = mk_msg("msg_name = socket.socket_peer.socket_address, msg_name_len = socket.socket_peer.socket_address_len, ioveclist = &{buf, len}, msg_control = 0, msg_controllen = 0, msg_flags = flags")
+    
+    sendmsg_generic(os, current, sockfd, msg, flags)
+end
+
+
+
+event write // write
+params
+    os      @IN  : OS
+    current @IN  : Process
+    sockfd  @IN  : Nat
+    buf     @IN  : void* # void *buf
+    count   @IN  : Nat  
+    ret     @OUT : Int
+function
+    msg = mk_msg("msg_name = socket.socket_peer.socket_address, msg_name_len = socket.socket_peer.socket_address_len, ioveclist = &{buf, count}, msg_control = 0, msg_controllen = 0, msg_flags = \emptyset")
+    
+    sendmsg_generic(os, current, sockfd, msg, \emptyset)
 end
 
 
@@ -1085,19 +1308,6 @@ end
 
 
 event read // read
-params
-    os      @IN  : OS
-    current @IN  : Process
-    fd      @IN  : Nat
-    buf     @IN  : void* # void *buf
-    count   @IN  : Nat  
-    ret     @OUT : Int
-function
-
-end
-
-
-event write // write
 params
     os      @IN  : OS
     current @IN  : Process
