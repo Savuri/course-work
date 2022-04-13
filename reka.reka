@@ -88,11 +88,9 @@ endtype
 type Handler
 type Handler3
 type Sigset : Nat-set
-type SignalFlag:
+type SignalFlag: # Мне достаточно описать SA_RESTART
 enum
-    SA_RESETHAND //Restore  the  signal action to the default upon entry to the signal handler.  This flag is meaningful  only  when  establishing  a  signal handler.
     SA_RESTART // Restart certain system call
-    SA_SIGINFO // The  signal handler takes three arguments, not one.  In this case, sa_sigaction should  be  set  instead  of  sa_handler. This flag is meaningful only when establishing a signal handler.
 endtype
 type SignalFlags : SignalFlag-set
 
@@ -100,7 +98,7 @@ type Sigaction : struct
 {
     Handler hand;
     Handler3 sigact;
-    SignalFlags signal_flags; # Я сюда лезть не хочу((( пусть сигналы опишу поверхностно.
+    SignalFlags signal_flags;
     Sigset sigset;
 }
 endtype
@@ -127,7 +125,7 @@ objattr proc_cred : Cred is
 end
 
 objattr proc_sigaction_array : Nat -m-> Sigaction is # sighand_struct === k_sigaction[_NSIG] === proc_sigaction_array
-**proc_sigaction_array** - обработчики. (описание сигналов не прикручивал)
+**proc_sigaction_array** - обработчики.# (описание сигналов не прикручивал)
 end
 
 objattr proc_pending_signals : Nat-list is // Это более расширеная структура с информацией о том от кого пришло и т.д. т.е. с полем 'siginfo_t info';
@@ -251,11 +249,12 @@ endobject
 
 type sk_buff : struct 
 {
-    Text buf_data;
+    void* buf_data;
     Nat consumed;
     Nat data_len;
-    Text buf_control_data;
+    void* buf_control_data;
     Nat control_len;
+    Text sender;
 }
 is
 **sk_buff** - данные внутри каждого буффера. Для *SOCK_DGRAM* и *SOCK_SEQPACKET*, можно сказать, предстваляет получаемую датаграмму. Для *SOCK_STREAM* буфферы будут читаться последовательно, отмечая уже прочитанные данные, учёт которых происходит в *consumed*. При *consumed* == *len* 
@@ -303,7 +302,7 @@ objattr socket_peer : Socket-ref is
 **socket_peer** - ссылка на сокета-друга, с котором б общение.
 end
 
-type SocketFlags: 
+type SocketFlag: 
 enum
        SO_ACCEPTCONN
        SO_ATTACH_FILTER //(since Linux 2.2)
@@ -331,7 +330,7 @@ enum
        SO_PEERCRED
        SO_PRIORITY
        SO_PROTOCOL //(since Linux 2.6.32)
-       SO_RCVBUF
+       SO_RCVBUF // Does not have effect in unix socket (buf callable?)
        SO_RCVBUFFORCE //(since Linux 2.6.14)
        SO_RCVLOWAT
        SO_SNDLOWAT
@@ -348,10 +347,12 @@ enum
        SO_TYPE
        SO_BUSY_POLL //(since Linux 3.11)
 is
-**SocketFlags** - перечесление флагов сокета.    
+**SocketFlag** - перечесление флагов сокета.    
 end
 
-objattr socket_flags : SocketFlags-set is
+type SocketFlags : SocketFlag-set
+
+objattr socket_flags : SocketFlags is
 **socket_flags** - флаги сокета. Осуществлять управление этими флагами можно с помощью *setsockopt* и  *getsockopt*
 end
 
@@ -361,8 +362,6 @@ enum
     SOCK_DGRAM
     SOCK_SEQPACKET
     SOCK_RAW # SOCK_RAW то же самое что и SOCK_DGRAM
-    SOCK_RDM
-    SOCK_PACKET
     SOCK_NONBLOCK
     SOCK_CLOEXEC
 is
@@ -466,7 +465,29 @@ end
 
 
 
-logical get_from_fifo // Взять элемент по стратегии fifo (очереди)
+logical get_list_head // Взять первый элемент списка с удалением
+params
+    T    @TYPE
+    fifo @IN  : T-list
+    el   @OUT : T
+function
+
+end
+
+
+
+action del_from_list // Удалить элемент i из списка
+params
+    T    @TYPE
+    fifo @IN  : T-list
+    idx  @IN  : Nat
+function
+    * Удалить элемент idx из списка
+end
+
+
+
+logical peek_list_head // Взять первый элемент списка без удаления
 params
     T    @TYPE
     fifo @IN  : T-list
@@ -666,28 +687,6 @@ end
 
 
 
-#If a blocked call to one of the following interfaces is
-#interrupted by a signal handler, then the call is automatically
-#restarted after the signal handler returns if the SA_RESTART flag
-#was used; otherwise the call fails with the error EINTR:
-
-#read, write, Socket interfaces: accept(2), connect(2), recv(2), recvfrom(2),
-#recvmmsg(2), recvmsg(2), send(2), sendto(2), and sendmsg(2),
-#unless a timeout has been set on the socket (see below).
-
-#The following interfaces are never restarted after being
-#interrupted by a signal handler, regardless of the use of
-#SA_RESTART; they always fail with the error EINTR when
-#interrupted by a signal handler:
-
-#* "Input" socket interfaces, when a timeout (SO_RCVTIMEO) has
-#been set on the socket using setsockopt(2): accept(2), recv(2),
-#recvfrom(2), recvmmsg(2) (also with a non-NULL timeout
-#argument), and recvmsg(2).
-
-#"Output" socket interfaces, when a timeout (SO_RCVTIMEO) has
-#been set on the socket using setsockopt(2): connect(2),
-#send(2), sendto(2), and sendmsg(2).
 event connect // systemcall connect
 params
     os       @IN  : OS
@@ -712,25 +711,15 @@ function
             current.proc_status := S
             wait INFWAIT {
                 trigger (peer.socket_queue != <..>) { // текст для триггера 1
-                      socket.socket_status := CONNECTED
-                      socket.socket_peer := OF.of_private_data
-                      current.proc_status := R
+                    socket.socket_status := CONNECTED
+                    socket.socket_peer := OF.of_private_data
+                    current.proc_status := R
                 }
                 
-                trigger (current.proc_pending_signals != <..>) { // текст для триггера 2
-                     signum = current.proc_pending_signals(0)
-                     current.proc_status := R
-                     #TODO: signal handling
-                     if (SA_RESTART \isin current.proc_sigaction_array(signum).signal_flags && SO_RCVTIMEO \isin socket.socket_flags) {
-                         current.proc_errno := EINTR
-                         return -1
-                     } elif (SA_RESTART \isin current.proc_sigaction_array(signum).signal_flags && SO_RCVTIMEO \notisin socket.socket_flags){
-                    
-                        #TODO: RESTART system call -- Здесь ничего не требуется это точно тоже самое. Дополнить эту часть в logical
-                    } else {
-                        current.proc_errno := EINTR
-                        return -1
-                    }
+                trigger (interrupt_logical(current, socket)) { // текст для триггера 2
+                    current.proc_errno := EINTR
+                    current.proc_status := R
+                    return -1
                }
             }
         } else {
@@ -761,7 +750,7 @@ function
         
         wait INFWAIT { 
             trigger (socket.socket_queue != <..>) { // текст для триггера 1
-                peer_socket = get_from_fifo(socket.socket_queue) // Тот кто подсоединяется
+                peer_socket = get_list_head(socket.socket_queue) // Тот кто подсоединяется
                 forany(newFD : Nat | newFD \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD) => nn \isin \dom(current.proc_fds)) { // Создаются fd, OpenFile, Socket. Причём все поля у новых OpenFile и Socket такие же, как и у этих же объектов соотвестующих sockfd. 
                     current.proc_status := R
                     new_socket = get_sock_data(current, newFD)
@@ -780,23 +769,10 @@ function
                 } 
             }
             
-            trigger (current.proc_pending_signals != <..>) { // текст для триггера 22
-                signum = current.proc_pending_signals(0)
-                #TODO: signal handling
-                if (SA_RESTART \isin current.proc_sigaction_array(signum).signal_flags && SO_RCVTIMEO \isin socket.socket_flags) {
-                    current.proc_errno := EINTR
-                    current.proc_status := R
-                        
-                    return -1
-                } elif (SA_RESTART \isin current.proc_sigaction_array(signum).signal_flags && SO_RCVTIMEO \notisin socket.socket_flags){
-                    current.proc_status := R
-                    #TODO: RESTART system call
-                } else {
-                    current.proc_errno := EINTR
-                    current.proc_status := R
-                       
-                    return -1
-                }
+            trigger (interrupt_logical(current, socket)) { // текст для триггера 22
+                current.proc_errno := EINTR
+                current.proc_status := R
+                return -1   
             }
         }            
        
@@ -939,7 +915,7 @@ params
     current @IN  : Process
     sockfd  @IN  : Nat
     level   @IN  : Level
-    optname @IN  : SocketFlags
+    optname @IN  : SocketFlag
     optval  @IN  : void*
     optlen  @IN  : Nat-ref
     ret     @OUT : Int
@@ -1004,7 +980,7 @@ params
     current @IN  : Process
     sockfd  @IN  : Nat
     level   @IN  : Level
-    optname @IN  : SocketFlags
+    optname @IN  : SocketFlag
     optval  @IN  : void*
     optlen  @IN  : Nat
     ret     @OUT : Int
@@ -1069,9 +1045,9 @@ enum
     MSG_DONTROUTE
     MSG_DONTWAIT
     MSG_EOR
-    MSG_MORE
+    MSG_MORE // Unix socket does not support this flag 
     MSG_NOSIGNAL
-    MSG_OOB
+    MSG_OOB // Unix socket does not support this flag
 is
 *MsgFlgas* - тип всех флагов для функций sendto, recvfrom
 endtype
@@ -1083,10 +1059,10 @@ params
     pre_state  @IN  : Universe
     post_state @IN  : Universe
     current    @IN  : Process 
+    socket     @IN  : Socket
     res        @OUT : Bool
-function
-    //TODO
-end 
+end
+    attr event-desc: Прерывание ожидания процесса, из-за прихода сигнала, который не блокируется маской (current.proc_pending_signals != <..> && exists x:Nat | (x \isin current.proc_pending_signals) && (x \notisin curren.proc_blocked_signals)). Если для пришедшего сигнала верно SA_RESTART \isin current.proc_sigaction_array(signum).signal_flags && SO_RCVTIMEO \notisin socket.socket_flags это эквиваленто перезапуску системного вызова т.е. в этом случае res == False, иначе res == True. 
 
 
 
@@ -1100,8 +1076,10 @@ endtype
 
 type ioveclist : iovec-list
 
+
+#MSG_NAME - to void*?
 type msghdr : struct {
-    void*     msg_name;
+    Text     msg_name;
     Nat       msg_namelen;
     ioveclist msg_iov;
     Nat       msg_iovlen;
@@ -1117,10 +1095,11 @@ endtype
 
 logical find_other
 params
-    sock_addr @IN  : void*
+    sock_addr @IN  : Text
     sock      @OUT : Socket
 function 
     //Находит сокет в системе по адрессу.
+    // Если такого сокета нет то вернёт null. TODO на ref
 end
 
 
@@ -1165,24 +1144,8 @@ function
     // 3) Устанавливается размер данных поле data_len
     // 4) Если есть загружаются дополнительные данные (если их нет, то буффер == 0)
     // 5) Устанавливается размер дополнительных данных
+    // 6) Устанавливается отправитель
 end
-
-
-
-logical get_data_from_buff
-params
-    buf @IN  : sk_buff
-    msg @OUT : msghdr
-function
-    // 1) Создаётся msghdr. 
-    // 2) В буферры iovec загружаются данные из buf_data
-    // 3) Если сокет dgram или seq, то дополнительные данные копируются. Если stream, то если после чтения некторого числа данных получилось, что used ==  data_len, то скопируются и дополнительные данные. Дальнейшее чтение прекращается.
-    // 4) Устанавливается размер дополнительных данных
-    //   
-end
-
-
-
 
 
 
@@ -1198,18 +1161,22 @@ function
     socket = get_sock_data(current, sockfd)
     other = find_other(msg.msg_name)
     
-    
+    #TODO чисто через wait(?)
     if (other.socket_buf_len == msg_max_queue(socket) || socket.socket_so_sndbuf + get_msg_len(msg) >= socket.socket_so_sndbuf) { // some text
         current.proc_status := S
         wait INFWAIT {
             trigger (other.socket_buf_len < msg_max_queue(socket) || get_msg_len(msg) < socket.socket_so_sndbuf / 2 - socket.socket_used_buffer) {//сообщение для тригерра 1
+                current.proc_status := R
+                
                 socket_buff = load_data_to_buff(msg)
                 add_to_list(other.socket_buf, socket_buff)
                 other.socket_buf_len := other.socket_buf_len + 1
             }
             
-            trigger (interrupt_logical(current)) { // сообщение для триггера 2
-                #TODO irq handling   
+            trigger (interrupt_logical(current, socket)) { // сообщение для триггера 2
+                current.proc_errno := EINTR
+                current.proc_status := R
+                return -1   
             }
         }
     }
@@ -1218,6 +1185,31 @@ function
     socket.socket_peer := other
     return 0
 end
+
+
+#If a blocked call to one of the following interfaces is
+#interrupted by a signal handler, then the call is automatically
+#restarted after the signal handler returns if the SA_RESTART flag
+#was used; otherwise the call fails with the error EINTR:
+
+#read, write, Socket interfaces: accept(2), connect(2), recv(2), recvfrom(2),
+#recvmmsg(2), recvmsg(2), send(2), sendto(2), and sendmsg(2),
+#unless a timeout has been set on the socket (see below).
+
+#The following interfaces are never restarted after being
+#interrupted by a signal handler, regardless of the use of
+#SA_RESTART; they always fail with the error EINTR when
+#interrupted by a signal handler:
+
+#* "Input" socket interfaces, when a timeout (SO_RCVTIMEO) has
+#been set on the socket using setsockopt(2): accept(2), recv(2),
+#recvfrom(2), recvmmsg(2) (also with a non-NULL timeout
+#argument), and recvmsg(2).
+
+#"Output" socket interfaces, when a timeout (SO_RCVTIMEO) has
+#been set on the socket using setsockopt(2): connect(2),
+#send(2), sendto(2), and sendmsg(2).
+
 
 
 #For datagram-oriented Unix Domain Socket, setting the SO_SNDBUF socket option has an effect, but the SO_RCVBUF option does not (manpage unix(7)). And even the buffer is big enough, we can still experience the packet overflow problem. That is because there is another limitation in the datagram type Unix Domain Socket. The backlog of the packets in the buffer is not unlimited. For example, the default value of the maximum backlog in most Linux systems is set to 10, i.e. only 10 packets can wait in the queue. The commands to check and increase the backlog limit are:
@@ -1291,7 +1283,112 @@ end
 
 
 
-event recvfrom //sendto
+logical sended_buffers
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    reciver  @IN  : Socket
+    sender   @IN  : Text
+    list_idx @OUT : Int-list
+function
+    idx_list =  <. -1 .> # TODO: Вообще я хочу здесь коснтруировать с пустого списка. Но этого возможности не позволяют. Так что поступим костыльно: добавим -1, удалим -1.
+
+    for (i in [0..\len(reciver.socket_buf)]) {
+        if (sender == '0' || reciver.socket_buf(i).sender == sender) {//Если sender == 0. То берём первого попашегося. 
+        #TODO насчёт порядка не знаю. Но вроде в ядре там в основном работа через head и tail (через tail отправка, через head берём)
+            add_to_list(idx_list, i)
+        }
+    }
+    
+    del_from_list(idx_list, 0)
+    
+    return idx_list
+end  
+
+#seqpacket в io ~ dgram
+
+logical get_data_from_buff
+params
+    buf            @IN  : sk_buff
+    msg            @IN  : msghdr
+    current_readed @IN  : Nat
+    ret            @OUT : Bool >< Bool
+function
+    // 1) Создаётся msghdr. 
+    // 2) В буферры iovec загружаются данные из buf_data
+    // 3) Если сокет dgram или seq, то дополнительные данные копируются. Если stream, то если после чтения некторого числа данных получилось, что used ==  data_len, то скопируются и дополнительные данные. Дальнейшее чтение прекращается.
+    // 4) Устанавливается размер дополнительных данных
+    // 5) Возращает Bool >< Bool, первые говорит достаточно ли данных считали, второй говорит удалять ли буффер (В случае STREAM чтения если чтение начато и не дочитано, до буфер не удаляется, во всех остальных случаях удаляется). Про первый: для датаграммы это был прочитан один буфер даже если не полностью (аналогично seqpacket). Для stream это либо прочитано до размера буффера получателя, либо прочитано до буффера в котором есть дополнительные данные, либо прочитано всё и читать больше нечего (этот случай подразумевает конец иттерации в основном цикле и здесь не описывается) 
+   // 6) Модифицирует current_readed 
+end
+
+
+
+action recvmsg_generic
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    msg      @IN  : msghdr
+    flags    @IN  : MsgFlags-set
+function
+    socket = get_sock_data(current, sockfd)
+    other  = find_other(msg.msg_name)
+    current_readed = 0
+    
+    current.proc_status := S
+    wait INFWAIT {
+        trigger (sended_buffers(os, current, socket, msg.msg_name) != <. .>) { // Описание триггера 1
+            current.proc_status := R
+            buffers_idx = sended_buffers(os, current, socket, msg.msg_name)
+            
+            
+            i = 1 # TODO tmp пока нижнее не исправлю
+            #TODO: сделать так чтобы заработоло.
+            #for (i in [0..\len(buffers_idx)]) {
+            
+                
+                pair = get_data_from_buff(socket.socket_buf(i), msg, current_readed)
+                
+                if (pair == (True, True)) {
+                    del_from_list(socket.socket_buf, i)
+                    * break
+                } elif (pair == (True, False)) {
+                    * break
+                } elif (pair == (False, True)) {
+                    del_from_list(socket.socket_buf, i)
+                }
+                
+                
+            #}
+        }
+        
+        trigger (interrupt_logical(current, socket)) { // Описание триггера для прерываний
+            current.proc_errno := EINTR
+            current.proc_status := R
+            return -1   
+        }
+    }
+    
+    return current_readed
+end
+
+
+
+event recvmsg //recvmsg
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    msg      @IN  : msghdr
+    flags    @IN  : MsgFlags-set
+    ret      @OUT : Int
+function
+    recvmsg_generic(os, current, sockfd, msg, flags)
+end
+
+
+event recvfrom //recvfrom
 params
     os       @IN  : OS
     current  @IN  : Process
@@ -1303,6 +1400,27 @@ params
     addrlen  @IN  : Nat
     ret      @OUT : Int  
 function
+    msg = mk_msg("msg_name = dst.address, msg_name_len = addrlen, ioveclist = &{buf, len}, msg_control = 0, msg_controllen = 0, msg_flags = flags")
+    
+    recvmsg_generic(os, current, sockfd, msg, flags)
+end
+
+
+event recv // recv
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    buf      @IN  : void*
+    len      @IN  : Nat
+    flags    @IN  : Nat-set #TODO
+    ret      @OUT : Int  
+function
+    #socket = get_sock_data(sockfd)
+    
+    msg = mk_msg("msg_name = socket.socket_peer.socket_address, msg_name_len = socket.socket_peer.socket_address_len, ioveclist = &{buf, len}, msg_control = 0, msg_controllen = 0, msg_flags = flags")
+    
+    recvmsg_generic(os, current, sockfd, msg, flags)
 end
 
 
@@ -1311,12 +1429,14 @@ event read // read
 params
     os      @IN  : OS
     current @IN  : Process
-    fd      @IN  : Nat
+    sockfd  @IN  : Nat
     buf     @IN  : void* # void *buf
     count   @IN  : Nat  
     ret     @OUT : Int
 function
-
+    msg = mk_msg("msg_name = socket.socket_peer.socket_address, msg_name_len = socket.socket_peer.socket_address_len, ioveclist = &{buf, count}, msg_control = 0, msg_controllen = 0, msg_flags = \emptyset")
+    
+    sendmsg_generic(os, current, sockfd, msg, \emptyset)
 end
 
 
