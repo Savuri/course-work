@@ -24,13 +24,12 @@ objattr os_socket_table : Text -m-> Socket is
 end
 
 objattr os_users : Uid-set is
-**os_users** - монжество всех пользователей, зарегистрированных в системе. (/etc/passwd)
+**os_users** - множество всех пользователей, зарегистрированных в системе. (/etc/passwd)
 end
 
 objattr os_groups : Gid-set is
-**os_groups** - монжество всех пользователей, зарегистрированных в системе. (/etc/group)
+**os_groups** - множество всех пользователей, зарегистрированных в системе. (/etc/group)
 end
-
 endobject
 
 
@@ -85,22 +84,24 @@ type Fcred : struct
 endtype
 
 # Раздел сигналов - Beg
-type Handler
-type Handler3
+#type Handler  -- не нужно
+#type Handler3 -- не нужно
 type Sigset : Nat-set
 type SignalFlag: # Мне достаточно описать SA_RESTART
 enum
-    SA_RESTART // Restart certain system call
+    SA_RESTART // Перезапустить определённый системный вызов.
 endtype
 type SignalFlags : SignalFlag-set
 
 type Sigaction : struct
 {
-    Handler hand;
-    Handler3 sigact;
-    SignalFlags signal_flags;
-    Sigset sigset;
+    #Handler hand; // Обработчик с одним параметром.
+    #Handler3 sigact; // Обработчик с 3мя параметрами.
+    SignalFlags signal_flags; // Флаги сигналов.
+    #Sigset sigset; // contains a bitmask with exactly one bit for each signal available in the system. It is used to block other signals during execution of the handler routine. Мне это не нужно.
 }
+is
+**Sigaction** - структура, описывающая работу с сигналами. 
 endtype
 # Раздел сигналов - End
 
@@ -113,7 +114,7 @@ objattr proc_pid : Int is
 end
 
 objattr proc_errno : Int is
-**proc_errno** устанавливается системные вызовом и некоторыми библиотечным фукнциями в случае возникновения ошибок.
+**proc_errno** - атрибут, хранящий целочисленный код последней ошибки.
 end
 
 objattr proc_fds : Nat -m-> Fd is 
@@ -121,27 +122,27 @@ objattr proc_fds : Nat -m-> Fd is
 end
 
 objattr proc_cred : Cred is
-**proc_cred** - информация о правах процесса
+**proc_cred** - информация о правах процесса.
 end
 
 objattr proc_sigaction_array : Nat -m-> Sigaction is # sighand_struct === k_sigaction[_NSIG] === proc_sigaction_array
-**proc_sigaction_array** - обработчики.# (описание сигналов не прикручивал)
+**proc_sigaction_array** - информация об обработчиках процесса. Отображение номера сигнала в # (обработку сигналов не прикручивал)
 end
 
-objattr proc_pending_signals : Nat-list is // Это более расширеная структура с информацией о том от кого пришло и т.д. т.е. с полем 'siginfo_t info';
-**proc_pending_signals** - сигналы, пришедшие на обработку
+objattr proc_pending_signals : Nat-list is # Это более расширеная структура с информацией о том от кого пришло и т.д. т.е. с полем 'siginfo_t info';
+**proc_pending_signals** - номера сигналов, пришедших на обработку. 
 end
 
-objattr proc_blocked_signals : Sigset is // Nat есть здесь, если сигнал блокируется. В реальности это битовая маска, но я пока сигналы их номером описываю.
-**proc_blocked_signals** - блокированные сигналы
+objattr proc_blocked_signals : Sigset is # Nat есть здесь, если сигнал блокируется. В реальности это битовая маска, но я пока сигналы их номером описываю.
+**proc_blocked_signals** - в этом множестве находятся номера сигналов, которые блокируются.
 end
 
 type ProcStatus:
 enum
     R // running or runnable (on run queue)
-    S // interruptible sleep (waiting for an event to complete) (В этом состоянии процес при блокировке)
+    S // interruptible sleep (waiting for an event to complete) (В этом состоянии процесc при блокировке)
 is
-**ProcStatus** - перечислимый тип, содержащий статус текущего процесса
+**ProcStatus** - перечислимый тип, содержащий статус текущего процесса:
 $enumdefs$
 endtype
 
@@ -157,14 +158,14 @@ object Fd is
 end
 
 objattr fd_open_file_ref : OpenFile-ref is 
-**fd_open_file_ref** - ссылка на структура с информацией об открытом файле.
+**fd_open_file_ref** - ссылка на структуру с информацией об открытом файле.
 end
 
-type FdFlag:
+type FdFlag: 
 enum
     FD_CLOEXEC // close on exec
 is
-**FdFlag** - тип для флагов, которые приписаны к файловому дескриптору на уровне конкретного процесса.
+**FdFlag** - тип для флагов, которые приписаны к файловому дескриптору на уровне конкретного процесса:
 $enumdefs$
 endtype
 
@@ -173,12 +174,10 @@ objattr fd_flags : FdFlag-set is # Хотя возможен только оди
 end
 endobject
 
-object File is
-**File** - inode. Объект содержащий метаинформацию о файлах, директориях и других объектах ФС.
-end
+object File
 
 objattr file_path : Text is
-**file_path** - Путь до файла
+**file_path** - абсолютный путь до файла.
 end
 
 type FileType:
@@ -187,8 +186,8 @@ enum
     DIRECTORY_TYPE    // директория
     SYMLINK_TYPE      // символическая ссылка
     SOCKET_TYPE       // сокет
-is 
-**FileType** - перечислимы тип, описывающий типы файлов.
+is
+**FileType** - перечислимы тип, описывающий типы файлов:
 $enumdefs$
 endtype
 
@@ -204,15 +203,17 @@ endobject
 
 
 object OpenFile is 
-**OpenFile** хранит информацию об открытом файле. Например такие данные, как флаги доступа, оступ в файле и т.д..
+**OpenFile** хранит информацию об открытом файле. Например, такие данные, как флаги доступа, оступ в файле и т.д..
 end
 
-objattr of_op_type : FileType is
-**of_op_type** - операции определённые для этого типа. Этим хотелось выразить наличия поля op в стркутуре откртытого файла, с целью различения типов открытых файлов. Здесь он просто равен типу файлу.
+
+# Бывший of_op_type - операции определённые для этого типа. Этим хотелось выразить наличия поля op в стркутуре откртытого файла, с целью различения типов открытых файлов. Здесь он просто равен типу файлу.
+objattr of_type : FileType is
+**of_type** - тип открытого файла. # Дублирует тип File. Дублирование необходимо т.к. файла для сокета в ФС ещё может не быть, но подсмотреть тип файла для описание ошибочных ситуаций нужно.  
 end
 
 objattr of_file : File-ref is
-**of_file** - артрибут **OpenFile**, который хранит ссылку на соотвестующий этому **OpenFile**, объект **File**.
+**of_file** - хранит ссылку на соотвестующий этому **OpenFile**, объект **File**.
 end
 
 objattr of_ref_cnt : Int is
@@ -226,38 +227,40 @@ enum
     O_RDWR    // доступ и на чтение, и на запись
     O_NONBLOCK  // запрет блокировки
 is
-**OpenFileType** перечисление флагов откртых файлов.
-
+**OpenFileType** перечисление флагов открытых файлов:
 $enumdefs$
 endtype
 
-objattr of_flags : OpenFileFlag-set is #note: смотри type OpenFileFlag 
+objattr of_flags : OpenFileFlag-set is # Как-то не точно описано, но усложнять не хочется. (не точность в возможности присутствия одновременно O_RDONLY, и O_WRONLY, и O_RDWR, хотя в реальности возможно наличие только одного из них)  
 **of_flags** - флаги открытого файла. 
 end
 
 
-objattr of_indent : Int is #note: unsigned long если не ошибаюсь
-**of_indent** - отступ в открытом файле, с которым работают все read/write.
-end
+#objattr of_indent : Int is #Мне это не нужно. Удалю позже
+#**of_indent** - отступ в открытом файле, с которым работают все read/write.
+#end
 
 objattr of_private_data : Socket-ref is
-**of_private_data - ссылка на важные структура данных. (Здесь находится ссылка на структуру сокет).**
+**of_private_data** - ссылка на важные структура данных. (Здесь находится ссылка на структуру сокет).
 end
 endobject
 
 
 
+const Nothing // Константа для неинициализированных частей
+
+
 type sk_buff : struct 
 {
-    void* buf_data;
-    Nat consumed;
-    Nat data_len;
-    void* buf_control_data;
-    Nat control_len;
-    Text sender;
+    void* buf_data; // буффер в котором передаются данные
+    Nat data_len; // количество байт данных
+    Nat consumed; // количество прочитанных байт данных (Нужно для SOCK_STREAM).
+    void* buf_control_data; // буффер дополнительных данных
+    Nat control_len; // количетсво байт дополнительных данных
+    Text sender; // адрес отправителя
 }
 is
-**sk_buff** - данные внутри каждого буффера. Для *SOCK_DGRAM* и *SOCK_SEQPACKET*, можно сказать, предстваляет получаемую датаграмму. Для *SOCK_STREAM* буфферы будут читаться последовательно, отмечая уже прочитанные данные, учёт которых происходит в *consumed*. При *consumed* == *len* 
+**sk_buff** - данные внутри каждого буффера. Для *SOCK_DGRAM* и *SOCK_SEQPACKET*, можно сказать, предстваляет получаемую датаграмму. Для *SOCK_STREAM* буфферы будут читаться последовательно, отмечая уже прочитанные данные, учёт которых происходит в *consumed*. При *consumed* == *len* буффер считается полностью прочитанным и удаляется из очереди. 
 endtype
 
 
@@ -361,16 +364,15 @@ enum
     SOCK_STREAM
     SOCK_DGRAM
     SOCK_SEQPACKET
-    SOCK_RAW // SOCK_RAW то же самое что и SOCK_DGRAM для unix сокетов
+    SOCK_RAW # SOCK_RAW == SOCK_DGRAM для unix сокетов (Буквально). В документации SOCK_RAW вообще не описан, но в коде при создании SOCK_RAW сокета, тип меняется на SOCK_DGRAM.
     SOCK_NONBLOCK
     SOCK_CLOEXEC
 is
 **SockType** - перечисление типов сокетов.
-$enumdefs$
 endtype
 
 objattr socket_type : SockType is
-**socket_type** - тип сокета. (SOCK_STREAM, SOCK_DGRAM, SOCK_SEQPACKET)
+**socket_type** - тип сокета.
 end
 
 type ShutdownFlags:
@@ -384,7 +386,7 @@ objattr socket_shutdown_flags : ShutdownFlags-set is
 end
 
 objattr socket_buf : sk_buff-list is
-**socket_buf_list** - буффер сокета
+**socket_buf_list** - буффер сокета.
 end
 
 objattr socket_buf_len : Nat is
@@ -396,7 +398,7 @@ objattr socket_so_sndbuf : Nat is
 end
 
 objattr socket_used_buffer : Nat is
-**socket_used_buffer** - уже использованные размер буффера.
+**socket_used_buffer** - уже использованный количество байт буффера.
 end
 
 type AddressFamily:
@@ -404,16 +406,17 @@ enum
     AF_UNIX // == AF_LOCAL
     AF_UNSPEC
 is 
-**AddressFamily** - перечесление семейств адрессов. В данной модели рассматривается только *AF_UNIX*.  
+**AddressFamily** - перечесление семейств адрессов. В данной модели рассматривается только *AF_UNIX*. 
+ 
 $enumdefs$
 endtype
 
 type Protocol:
 enum
-    PF_UNSPEC
     PF_UNIX // == PF_LOCAL
+    PF_UNSPEC
 is
-**Protocol** - протоколы.
+**Protocol** - протоколы:
 
 $enumdefs$
 endtype
@@ -454,35 +457,39 @@ is
 endtype
 
 
-action add_to_list // Добавить элемент по стратегии fifo (очереди)
+const DEFAULT_SO_SNDBUF : Nat // Значение в /proc/sys/net/core/wmem_default
+const MAX_SO_SNDBUF : Nat // Значение в /proc/sys/net/core/wmem_max
+
+
+action add_to_list // Добавить элемент в список l (по стратегии fifo).
 params
     T @TYPE
-    fifo @IN : T-list
+    l @IN : T-list
     el   @IN : T
 function 
-    fifo(\len fifo) := el
+    l(\len l) := el
 end
 
 
 
-logical get_list_head // Взять первый элемент списка с удалением
+logical get_list_head // Взять первый элемент списка l с удалением.
 params
     T    @TYPE
-    fifo @IN  : T-list
+    l @IN  : T-list
     el   @OUT : T
 function
-
+    * Взять первый элемент списка l с удалением.
 end
 
 
 
-action del_from_list // Удалить элемент i из списка
+action del_from_list // Удалить элемент idx из списка l.
 params
     T    @TYPE
     fifo @IN  : T-list
     idx  @IN  : Nat
 function
-    * Удалить элемент idx из списка
+    * Удалить элемент idx из списка l.
 end
 
 
@@ -508,19 +515,19 @@ function
 end 
 
 
-
-logical get_sock_data // !get socket private data of fd_num for current procces 
+# Для сокращения записи
+logical get_sock_data // получить структуру данных для процесса current и сокета sockfd.
 params
-    current @IN  : Process
-    sockfd  @IN  : Nat
-    sock    @OUT : Socket
+    current              @IN  : Process
+    sockfd               @IN  : Nat
+    sock @OUT : Socket
 function
     return current.proc_fds(sockfd).fd_open_file_ref.of_private_data 
 end
 
 
-
-logical get_open_file
+# Для сокращения записи
+logical get_open_file // получить открытый файл для процесс current и сокета fd.
 params
     current @IN  : Process
     fd      @IN  : Nat
@@ -559,6 +566,8 @@ const MAX_FDS_PER_PROC : Nat // Максимальное число файлов
 const MAX_OPEN_FILES   : Nat // Максимальное число открытых файлов в системе. Это число может быть найдено, например, в файле /proc/sys/fs/file-max
 
 
+const NULL : void*
+
 
 event socket // socket
 params
@@ -572,33 +581,30 @@ invariant domain == AF_UNIX // Модель только для UNIX сокет�
 invariant current \isin os.os_proceses // Текущей процесс существует в рамках системы
 function
     forany(newFD : Nat | newFD \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD) => nn \isin \dom(current.proc_fds)) {
-        #mk_Fd()
-        #openfile = mk_OpenFile()
-        #socket = mk_Socket()
+    socket = 'mk_socket(.socket_status=UNCONNECTED, .socket_address=Nothing, .socket_addrlen=Nothing, .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=Nothing, .socket_flags={. .}, .socket_type=Nothing, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(), .socket_buf_len=0, socket_so_sndbuf=DEFAULT_SO_SNDBUF, .socket_used_buffer=0)'
         
-        if (SOCK_CLOEXEC \isin sock_type) {
-            current.proc_fds(newFD).fd_flags := {. FD_CLOEXEC .}
+        if (SOCK_DGRAM \isin sock_type || SOCK_RAW \isin sock_type) {
+            socket.socket_type := SOCK_DGRAM
+        } elif (SOCK_STREAM \isin sock_type) {
+            socket.socket_type := SOCK_STREAM
+        } else { //SOCK_SEQPACKET \isin sock_type
+           socket.socket_type := SOCK_SEQPACKET
         }
         
-        openfile = get_open_file(current, fd)
-        socket = get_sock_data(current, fd)
-            
-        openfile.of_flags := {. O_RDWR .} 
+        openfile = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Null, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket)'    
             
         if (SOCK_NONBLOCK \isin sock_type) {
             add_to_set(openfile.of_flags, O_NONBLOCK)
         }
-            
-        socket.socket_status := UNCONNECTED
-        openfile.of_op_type := SOCKET_TYPE
-            
-        if (SOCK_DGRAM \isin sock_type) {
-            socket.socket_type := SOCK_DGRAM
-        } elif (SOCK_STREAM \isin sock_type) {
-            socket.socket_type := SOCK_STREAM
-        } elif (SOCK_SEQPACKET \isin sock_type) {
-           socket.socket_type := SOCK_SEQPACKET
+        
+        if (SOCK_CLOEXEC \isin sock_type) {
+            newFDObject = 'mk_Fd(.fd_open_file_ref=\ref(openfile), .fd_flags={. FD_CLOEXEC .})'
+        } else {
+            newFDObject = 'mk_Fd(.fd_open_file_ref=\ref(openfile), .fd_flags={. .})'
         }
+        
+        add_to_map(current.proc_fds, newFD, newFDObject)
+        add_to_set(os.os_open_file_table, openfile)
             
         return newFD
     }
@@ -620,49 +626,49 @@ endtype
 const PATH_MAX : Nat // Maximum path size in system
 
 
-# TODO
-logical resolve_path // resolve_path (man path_resolution)
+# TODO описать алгоритм. Как я понимаю по итогу это нужно будет описывать с помощью алгоритма.
+logical make_path_abs // если сокет абстрактный, то возвращаем путь. Если путь абсолютный, то избавляемся от ., .., символьных ссылок в пути. Если путь относительный, добавляем слева current_cur_path и избавляемся от ., .., символьных ссылок в пути.
 params
-    relative @IN  : Text
-    abs      @OUT : Text
+    current @IN  : Process
+    path    @IN  : Text
+    abs     @OUT : Text
 function
-    * привести относительный путь в абсолютный man path_resolution. С проверками что гулять по директории можно и директории существуют (в этих случаях возвращая ошибку)
+    if (path(0) == '\0') {
+        return path
+    }
+    
+    * Если путь абсолютный, то избавляемся от ., .., символьных ссылок в пути. Если путь относительный, добавляем слева current_cur_path и избавляемся от ., .., символьных ссылок в пути.
 end
 
 
 
-event bind // bind (пока описываются только абсолютные пути)
+event bind // bind
 params
     os       @IN  : OS
     current  @IN  : Process
-    sockfd   @IN  : Nat
-    sockaddr @IN  : Sockaddr_un
+    sockfd   @IN  : Int
+    sockaddr @IN  : Sockaddr_un-ref
     addrlen  @IN  : Nat
     ret      @OUT : Int
-function # addrlen поработать. Понятно что этот параметр нужен для контроля за памятью для ядра. В модели как его использование описать.
-    if (sockaddr.sun_path(0) != '\0') { # Обычный сокет
-        # создать новый файл
-        
-        
-        socket_address = resolve_path(sockaddr.sun_path)
-        
-        # TODO относительный bind...
-        forany (newFile : File | newFile.file_path = socket_address && newFile.file_type == SOCKET_TYPE) {
-            add_to_set(os.os_files, newFile) // Создаётся новый файл
-            current.proc_fds(sockfd).fd_open_file_ref.of_file := newFile // сокет связывается с созданным файлом
-            #TODO: user, group, permission...?
-        }
+function
+    socket = get_sock_data(current, sockfd)
+    openfile = get_open_file(current, sockfd)
+
+    sock_address = make_path_abs(current, \deref(sockaddr).sun_path)
+
+    if (sock_address(0) != '\0') { # Обычный сокет. Абстрактному сокету это не нужно.
+        newFile = 'mk_File(.file_path=sock_address, .file_type=SOCKET_TYPE, .file_cred = { fc_uid, .fc_gid, .fc_permissions = {. S_IRUSR, S_IWUSR, S_IXUSR, S_IRGRP, S_IWGRP, S_IXGRP, S_IROTH, S_IWOTH, S_IXOTH.} \diff current.proc_cred.cr_umask })' // Создание нового файла
+        add_to_set(os.os_files, newFile) // Добавление файла в ФС
+        openfile.of_file := newFile // сокет связывается с созданным файлом
+        #TODO: user, group, permission... в errors?
     }
     
-    add_to_map(os.os_socket_table, sockaddr.sun_path, current.proc_fds(sockfd).fd_open_file_ref.of_private_data) // зафиксировать созданный сокет в системе и его адрес, для последующего нахождения. В Linux это реализует с помощью хэшей
-    
-    current.proc_fds(sockfd).fd_open_file_ref.of_private_data.socket_address := sockaddr.sun_path
-    current.proc_fds(sockfd).fd_open_file_ref.of_private_data.socket_addrlen := addrlen
+    socket.socket_address := sock_address
+    socket.socket_addrlen := addrlen
+    add_to_map(os.os_socket_table, sock_address, socket) // зафиксировать созданный сокет в системе и его адрес, для последующего нахождения. В Linux это реализует с помощью хэшей
     
     return 0
 end
-
-#TODO fix sockfd input from Nat to Int
 
 const SOMAXCONN : Nat // значение в /proc/sys/net/core/somaxconn файле
 
@@ -672,7 +678,7 @@ event listen // listen
 params
     os       @IN  : OS
     current  @IN  : Process
-    sockfd   @IN  : Nat
+    sockfd   @IN  : Int
     backlog  @IN  : Int
     ret      @OUT : Int
 function
@@ -695,91 +701,105 @@ event connect // systemcall connect
 params
     os       @IN  : OS
     current  @IN  : Process
-    sockfd   @IN  : Nat
-    sockaddr @IN  : Sockaddr_un
+    sockfd   @IN  : Int
+    sockaddr @IN  : Sockaddr_un-ref
     addrlen  @IN  : Nat
     ret      @OUT : Int 
 function
-#If possible we block in connect(2) if the max backlog of the listen socket is been reached. This won't break
-#old apps and it will avoid huge amount of socks hashed (this for unix_gc() performances reasons).
+    #Комментарий из кода -> Фича Linux: If possible we block in connect(2) if the max backlog of the listen socket is been reached. This won't break old apps and it will avoid huge amount of socks hashed (this for unix_gc() performances reasons).
     socket = get_sock_data(current, sockfd)
-    
-    forany(OF : OpenFile | OF \isin os.os_open_file_table && OF.of_private_data.socket_address == sockaddr.sun_path) {//Нашли сокет-друга
-        socket.socket_status := CONNECTING
-        peer = OF.of_private_data
-        
-        if (socket.socket_type == SOCK_STREAM || socket.socket_type == SOCK_SEQPACKET) {
-            
-            socket.socket_status := CONNECTING
-            add_to_list(peer.socket_queue, socket) 
-            current.proc_status := S
-            wait INFWAIT {
-                trigger (peer.socket_queue != <..>) { // текст для триггера 1
-                    socket.socket_status := CONNECTED
-                    socket.socket_peer := OF.of_private_data
-                    current.proc_status := R
-                }
-                
-                trigger (interrupt_logical(current, socket)) { // текст для триггера 2
-                    current.proc_errno := EINTR
-                    current.proc_status := R
-                    return -1
-               }
-            }
-        } else {
-            socket.socket_peer := OF.of_private_data
-        }
-    }
+    server = get_by_address(os, \deref(sockaddr).sun_path)
 
+    if (socket.socket_type == SOCK_STREAM || socket.socket_type == SOCK_SEQPACKET) {
+        socket.socket_status := CONNECTING
+        
+        current.proc_status := S
+        wait INFWAIT {
+            trigger (\len(server.socket_queue) < server.socket_backlog) { // текст для триггера 1
+                current.proc_status := R
+                add_to_list(server.socket_queue, socket) 
+            }
+            
+            trigger (interrupt_logical(current, socket)) { // текст для триггера 2
+                current.proc_errno := EINTR
+                current.proc_status := R
+                return -1
+            }
+        }
+        
+        current.proc_status := S
+        
+        wait INFWAIT {
+            trigger (server.socket_queue(0) == socket) { // текст для триггера 1
+                socket.socket_status := CONNECTED
+                socket.socket_peer := socket
+                del_from_list(server.socket_queue, 0)
+                current.proc_status := R
+            }
+                
+            trigger (interrupt_logical(current, socket)) { // текст для триггера 2
+                # Описать подчищивание надо? я про верхний wait TODO(??)
+                current.proc_errno := EINTR
+                current.proc_status := R
+                return -1
+            }
+        }
+    } else {
+        socket.socket_peer := server
+    }
+    
     return 0    
 end
 
 
 
+#TODO accept4. Хорошо что оно к accept сводится
+#On Linux, the new socket returned by accept() does not inherit file status flags such as O_NONBLOCK and O_ASYNC from the listening socket. В POSIX об этом ничего нет.
 event accept // accept
 params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    sockaddr @IN  : Sockaddr_un
+    sockaddr @IN  : Sockaddr_un-ref
     addrlen  @IN  : Nat-ref
     ret      @OUT : Int
 function
     socket = get_sock_data(current, sockfd)
    
-   
-    if (socket.socket_queue == <..>) {// Очередь пуста. Мероприятия по ожиданию
-        current.proc_status := S
-        
-        
-        wait INFWAIT { 
-            trigger (socket.socket_queue != <..>) { // текст для триггера 1
-                peer_socket = get_list_head(socket.socket_queue) // Тот кто подсоединяется
-                forany(newFD : Nat | newFD \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD) => nn \isin \dom(current.proc_fds)) { // Создаются fd, OpenFile, Socket. Причём все поля у новых OpenFile и Socket такие же, как и у этих же объектов соотвестующих sockfd. 
-                    current.proc_status := R
-                    new_socket = get_sock_data(current, newFD)
+    current.proc_status := S
+    wait INFWAIT { 
+        trigger (socket.socket_queue != <..>) { // текст для триггера 1. Есть кого принимать
+            current.proc_status := R
+            peer = get_list_head(socket.socket_queue) // Тот, кто подсоединяется
+            forany(newFD : Nat | newFD \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD) => nn \isin \dom(current.proc_fds)) { // Создаются fd, OpenFile, Socket. Причём все поля у новых OpenFile и Socket такие же, как и у этих же объектов соотвестующих sockfd. 
+                forany(newUnixAddress : Text | newUnixAddress \notisin \dom(os.os_socket_table) && newUnixAddress(0) == '\0') {
+                    new_socket = 'mk_socket(.socket_status=CONNECTED, .socket_address=newUnixAddress, .socket_addrlen=\len(newUnixAddress), .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=peer, .socket_flags={. .}, .socket_type=socket.socket_type, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(), .socket_buf_len=0, socket_so_sndbuf=socket.socket_so_sndbuf, .socket_used_buffer=0)'
+                
+                    peer.socket_peer := new_socket
+                    peer.socket_status := CONNECTED
                     
-                    new_socket.socket_peer  := peer_socket
-                    peer_socket.socket_peer := new_socket
-                    
-                    new_socket.socket_status  := CONNECTED
-                    peer_socket.socket_status := CONNECTED
-                    
-                    sockaddr.sun_family := AF_UNIX
-                    sockaddr.sun_path   := peer_socket.socket_address
-                    \deref(addrlen) := peer_socket.socket_addrlen
-                    
-                    return newFD
-                } 
-            }
+                    if (sockaddr != NULL) { //sockaddr != NULL
+                        * strncmp(\ref(\deref(sockaddr).sun_path), \ref(newUnixAddress), min(\len(newUnixAddress, \deref(addrlen)))
+                        \deref(addrlen) := \len(newUnixAddress)      
+                    }
+
+                    openfile = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Null, .of_ref_cnt=1, of_flags={. O_RDWR .}, .of_private_data=socket)'    
+                    newFDObject = 'mk_Fd(.fd_open_file_ref=\ref(openfile), .fd_flags={. .})'
+
+                    add_to_map(current.proc_fds, newFD, newFDObject)
+                    add_to_set(os.os_open_file_table, openfile)
+                    add_to_map(os.os_socket_table, new_socket.socket_address.sun_path, new_socket)
+                
+                    return newFD   
+                }
+            } 
+        }
             
-            trigger (interrupt_logical(current, socket)) { // текст для триггера 22
-                current.proc_errno := EINTR
-                current.proc_status := R
-                return -1   
-            }
-        }            
-       
+        trigger (interrupt_logical(current, socket)) { // текст для триггера 22
+            current.proc_errno := EINTR
+            current.proc_status := R
+            return -1   
+        }
     }
 end
 
@@ -792,21 +812,17 @@ params
     fd       @IN  : Nat
     ret      @OUT : Int
 invariant current.proc_fds(fd).fd_open_file_ref.of_ref_cnt >= 1// Если у файла ref_cnt == 0, то его в этой таблице быть не должно 
-invariant current.proc_fds(fd).fd_open_file_ref.of_op_type == SOCKET_TYPE// Вызов рассматривается только для сокетов
-
-function    
-    open_file = current.proc_fds(fd).fd_open_file_ref
-    open_file.of_ref_cnt--
+invariant current.proc_fds(fd).fd_open_file_ref.of_type == SOCKET_TYPE// Вызов рассматривается только для сокетов
+function
+    socket = get_sock_data(current, fd)
+    open_file = get_open_file(current, fd)
 
     remove_from_map(current.proc_fds, fd)
+    open_file.of_ref_cnt--
  
     if (open_file.of_ref_cnt == 0) {
         remove_from_set(os.os_open_file_table, \deref(open_file))
-        
-        socket = get_sock_data(current, fd)
-        
         remove_from_map(os.os_socket_table, socket.socket_address)
-        
     }
     
     return 0
@@ -860,49 +876,53 @@ params
 function
     forany(newFD1 : Nat | newFD1 \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD1) => nn \isin \dom(current.proc_fds)) {
         forany(newFD2 : Nat | newFD2 \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD2) => nn \isin \dom(current.proc_fds)) {
-           if (SOCK_CLOEXEC \isin sock_type) {
-                current.proc_fds(newFD1).fd_flags := {. FD_CLOEXEC .}
-                current.proc_fds(newFD2).fd_flags := {. FD_CLOEXEC .}
+            forany(newUnixAddress1 : Text | newUnixAddress1 \notisin \dom(os.os_socket_table) && newUnixAddress1(0) == '\0') {
+                forany(newUnixAddress2 : Text | newUnixAddress2 \notisin \dom(os.os_socket_table) && newUnixAddress2(0) == '\0') {
+                    socket1 =  'mk_socket(.socket_status=CONNECTED, .socket_address=newUnixAddress1, .socket_addrlen=\len(newUnixAddress1), .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=Nothing, .socket_flags={. .}, .socket_type=Nothing, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(), .socket_buf_len=0, socket_so_sndbuf=DEFAULT_SO_SNDBUF, .socket_used_buffer=0)'
+                    socket2 =  'mk_socket(.socket_status=CONNECTED, .socket_address=newUnixAddress2, .socket_addrlen=\len(newUnixAddress2), .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=Nothing, .socket_flags={. .}, .socket_type=Nothing, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(), .socket_buf_len=0, socket_so_sndbuf=DEFAULT_SO_SNDBUF, .socket_used_buffer=0)'
+                    socket1.socket_peer := socket2
+                    socket2.socket_peer := socket1
+                    
+                    if (SOCK_DGRAM \isin sock_type || SOCK_RAW \isin sock_type) {
+                        socket1.socket_type := SOCK_DGRAM
+                        socket2.socket_type := SOCK_DGRAM
+                    } elif (SOCK_STREAM \isin sock_type) {
+                        socket1.socket_type := SOCK_STREAM
+                        socket2.socket_type := SOCK_STREAM
+                    } else { //SOCK_SEQPACKET \isin sock_type
+                        socket1.socket_type := SOCK_SEQPACKET
+                        socket2.socket_type := SOCK_SEQPACKET
+                    }
+                    
+                    openfile1 = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Null, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket1)'
+                    openfile2 = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Null, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket2)'    
+                        
+                    if (SOCK_NONBLOCK \isin sock_type) {
+                        add_to_set(openfile1.of_flags, O_NONBLOCK)
+                        add_to_set(openfile2.of_flags, O_NONBLOCK)
+                    }
+                    
+                    if (SOCK_CLOEXEC \isin sock_type) {
+                        newFDObject1 = 'mk_Fd(.fd_open_file_ref=\ref(openfile1), .fd_flags={. FD_CLOEXEC .})'
+                        newFDObject2 = 'mk_Fd(.fd_open_file_ref=\ref(openfile2), .fd_flags={. FD_CLOEXEC .})'
+                    } else {
+                        newFDObject1 = 'mk_Fd(.fd_open_file_ref=\ref(openfile1), .fd_flags={. .})'
+                        newFDObject2 = 'mk_Fd(.fd_open_file_ref=\ref(openfile2), .fd_flags={. .})'
+                    }
+                    
+                    add_to_map(current.proc_fds, newFD1, newFDObject1)
+                    add_to_map(current.proc_fds, newFD2, newFDObject2)
+                    add_to_set(os.os_open_file_table, openfile1)
+                    add_to_set(os.os_open_file_table, openfile2)
+                    add_to_map(os.os_socket_table, newUnixAddress1, socket1)
+                    add_to_map(os.os_socket_table, newUnixAddress2, socket2)
+
+                    fds(0) := newFD1
+                    fds(1) := newFD2
+                    
+                    return 0
+                }
             }
-            
-            openfile1 = get_open_file(current, newFD1)
-            openfile2 = get_open_file(current, newFD2)
-            
-            socket1 = get_sock_data(current, newFD1)
-            socket2 = get_sock_data(current, newFD2)
-              
-            openfile1.of_flags := {. O_RDWR .} 
-            openfile2.of_flags := {. O_RDWR .}
-            
-            openfile1.of_op_type := SOCKET_TYPE
-            openfile1.of_op_type := SOCKET_TYPE
-                
-            if (SOCK_NONBLOCK \isin sock_type) {
-                add_to_set(openfile1.of_flags, O_NONBLOCK)
-                add_to_set(openfile2.of_flags, O_NONBLOCK)
-            }
-                
-            socket1.socket_status := CONNECTED
-            socket2.socket_status := CONNECTED
-            
-            socket1.socket_peer := socket2
-            socket2.socket_peer := socket1
-            
-            if (SOCK_DGRAM \isin sock_type) {
-                socket1.socket_type := SOCK_DGRAM
-                socket2.socket_type := SOCK_DGRAM
-            } elif (SOCK_STREAM \isin sock_type) {
-                socket1.socket_type := SOCK_STREAM
-                socket2.socket_type := SOCK_STREAM
-            } elif (SOCK_SEQPACKET \isin sock_type) {
-                socket1.socket_type := SOCK_SEQPACKET
-                socket2.socket_type := SOCK_SEQPACKET
-            }
-            
-            fds(0) := newFD1
-            fds(1) := newFD2
-            
-            return 0
         }
     }
 
@@ -918,7 +938,7 @@ is
 end
 
 
-
+#TODO
 event getsockopt
 params
     os      @IN  : OS
@@ -931,7 +951,6 @@ params
     ret     @OUT : Int
 function
     if (optname == SO_ACCEPTCONN) {
-        
     } elif (optname == SO_ATTACH_FILTER) {
     } elif (optname == SO_ATTACH_BPF) {
     } elif (optname == SO_ATTACH_REUSEPORT_CBPF) {
@@ -939,7 +958,6 @@ function
     } elif (optname == SO_BINDTODEVICE) {
     } elif (optname == SO_BROADCAST) {
     } elif (optname == SO_BSDCOMPAT) {
-        # Я умер в новых версиях
     } elif (optname == SO_DEBUG) {
     } elif (optname == SO_DETACH_FILTER) {
     } elif (optname == SO_DETACH_BPF) {
@@ -949,7 +967,6 @@ function
     } elif (optname == SO_INCOMING_CPU) {
     } elif (optname == SO_KEEPALIVE) {
     } elif (optname == SO_LINGER) {
-        # Особый челик
     } elif (optname == SO_LOCK_FILTER) {
     } elif (optname == SO_MARK) {
     } elif (optname == SO_OOBINLINE) {
@@ -962,7 +979,6 @@ function
     } elif (optname == SO_RCVBUF) {
     } elif (optname == SO_RCVBUFFORCE) {
     } elif (optname == SO_RCVLOWAT) {
-        #Особоый
     } elif (optname == SO_SNDLOWAT) {
     } elif (optname == SO_RCVTIMEO) {
     } elif (optname == SO_SNDTIMEO) {
@@ -976,14 +992,13 @@ function
     } elif (optname == SO_TYPE) {
     } elif (optname == SO_BUSY_POLL) {
     } elif (optname == SO_TIMESTAMPING) {
-     # Особый + неожиданный челик
     }
     
     return 0
 end
 
 
-
+#TODO
 event setsockopt
 params
     os      @IN  : OS
@@ -1003,7 +1018,6 @@ function
     } elif (optname == SO_BINDTODEVICE) {
     } elif (optname == SO_BROADCAST) {
     } elif (optname == SO_BSDCOMPAT) {
-        # Я умер в новых версиях
     } elif (optname == SO_DEBUG) {
     } elif (optname == SO_DETACH_FILTER) {
     } elif (optname == SO_DETACH_BPF) {
@@ -1013,7 +1027,6 @@ function
     } elif (optname == SO_INCOMING_CPU) {
     } elif (optname == SO_KEEPALIVE) {
     } elif (optname == SO_LINGER) {
-        # Особый
     } elif (optname == SO_LOCK_FILTER) {
     } elif (optname == SO_MARK) {
     } elif (optname == SO_OOBINLINE) {
@@ -1026,7 +1039,6 @@ function
     } elif (optname == SO_RCVBUF) {
     } elif (optname == SO_RCVBUFFORCE) {
     } elif (optname == SO_RCVLOWAT) {
-        #Особоый
     } elif (optname == SO_SNDLOWAT) {
     } elif (optname == SO_RCVTIMEO) {
     } elif (optname == SO_SNDTIMEO) {
@@ -1040,7 +1052,6 @@ function
     } elif (optname == SO_TYPE) {
     } elif (optname == SO_BUSY_POLL) {
     } elif (optname == SO_TIMESTAMPING) {
-     # Особый
     }
     
     
@@ -1055,12 +1066,26 @@ enum
     MSG_DONTROUTE
     MSG_DONTWAIT
     MSG_EOR
+    MSG_TRUNC
+    MSG_CTRUNC
+    MSG_ERRQUEUE
     MSG_MORE // Unix socket does not support this flag 
     MSG_NOSIGNAL
     MSG_OOB // Unix socket does not support this flag
 is
 *MsgFlgas* - тип всех флагов для функций sendto, recvfrom
 endtype
+
+
+
+logical connection_request
+params
+    pre_state  @IN  : Universe
+    post_state @IN  : Universe
+    server     @IN  : Socket
+    res        @OUT : Bool
+end
+    attr event-desc: Прерывание ожидания процесса, из-за прихода запроса на подключение (server.socket_queue != <..>)
 
 
 
@@ -1087,7 +1112,7 @@ endtype
 type ioveclist : iovec-list
 
 
-#MSG_NAME - to void*?
+
 type msghdr : struct {
     Text     msg_name;
     Nat       msg_namelen;
@@ -1103,13 +1128,13 @@ endtype
 
 
 
-logical get_other
+logical get_by_address
 params
     os        @IN  : OS
     sock_addr @IN  : Text
     sock      @OUT : Socket
 function 
-    
+    return os.os_socket_table(sock_addr)
 end
 
 
@@ -1124,20 +1149,21 @@ end
 
 
 
-logical get_msg_len
+event get_msg_len
 params
     msg @IN  : msghdr
     res @OUT : Nat
 function
-    * res = 0
+    def _res : Nat := 0
 
     for (i in [0..msg.msg_iovlen]) {
-        * res = res + msg.msg_iov(i).iov_len
+        _res := _res + msg.msg_iov(i).iov_len
     }
     
-    return res
+    return _res
 end
-
+    attr algorithm: 'Алгоритм, считающий размер данных в msg'
+    
 
 
 logical mk_msg
@@ -1146,44 +1172,63 @@ params
     ret  @OUT : msghdr
 function
     * Создаёт и инициализирует msghdr согласно prm1. TODO: заменить на встроенный mk, когда появится.
-end  
-
-
-
-logical load_data_to_buff
-params
-    msg @IN  : msghdr 
-    buf @OUT : sk_buff
-function
-    * Создаётся sk_buff. Отмечается изменение использованного пространства буффера данного сокета (so_sndbuff)
-    * Данные просматриваются последовательно и загружаются подряд
-    * Устанавливается общий размер данных (поле data_len)
-    * Если есть дополнительные данные, они загружаются (если их нет, то буффер == null)
-    * Устанавливается размер дополнительных данных
-    * Устанавливается адрес отправителя
 end
 
 
+#TODO: убрать memcpyn 
+event load_data
+params
+    msg     @IN  : msghdr
+    socket  @IN  : Socket
+    reciver @IN  : Socket
+function
+    socket.socket_type := reciver.socket_type
+    buf = 'mk_skbuff(".buf_data = alloc_ptr(), .data_len = 0, .consumed = 0, buf_control_data = alloc_prt(), control_len = 0", .sender = socket.socket_address)' // Устанавливается адрес отправителя
+    socket.socket_used_buffer := socket_used_buffer + get_msg_len(msg) //(Отмечается изменение использованного пространства буффера данного сокета)
+    
+    for (i in [0..msg.msg_iovlen]) {
+        // Данные просматриваются последовательно и загружаются подряд
+        * memcpy(buf.buf_data + buf.data_len, msg.msg_iov(i).iovbase, msg.msg_iov(i).iov_len) # Описываю будто адрессная арифметика с void* работает 1 байт
+        // Устанавливается общий размер данных (поле data_len)
+        buf.data_len := buf.data_len + msg.msg_iov(i).iov_len
+    }
+    
+    if (msg.msg_controllen != 0) {
+        //Если есть дополнительные данные, они загружаются
+        * memcpy(buf.buf_control_data, msg.msg_control, msg.msg_controllen)
+        // Устанавливается размер дополнительных данных  
+        buf.control_len := msg.msg_controllen
+    } else {
+        // Если их нет, то буффер == null
+        buf.buf_control_data := NULL
+        //Устанавливается размер дополнительных данных
+        buf.control_len := 0
+    }
+    
+    add_to_list(reciver.socket_buf, buf)
+    reciver.socket_buf_len++
+end
+    attr algorithm: 'Алгоритм загрузки данных'
 
-action sendmsg_generic // TODO event->action
+
+
+action sendmsg_generic // sendmsg_generic
 params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    msg      @IN  : msghdr
+    msg      @IN  : msghdr-ref
     flags    @IN  : MsgFlags-set
     ret      @OUT : Int
 function
     socket = get_sock_data(current, sockfd)
-    other = get_other(os, msg.msg_name)
+    other = get_by_address(os, msg.msg_name)
 
     current.proc_status := S
     wait INFWAIT {
         trigger (other.socket_buf_len < msg_max_queue(socket) || get_msg_len(msg) < socket.socket_so_sndbuf / 2 - socket.socket_used_buffer) {//сообщение для тригерра 1
             current.proc_status := R
-            socket_buff = load_data_to_buff(msg)
-            add_to_list(other.socket_buf, socket_buff)
-            other.socket_buf_len := other.socket_buf_len + 1
+            load_data(msg, socket, other)
         }
             
         trigger (interrupt_logical(current, socket)) { // сообщение для триггера 2
@@ -1229,16 +1274,18 @@ end
 #        sysctl -w net.unix.max_dgram_qlen=128 
 # У меня на машине тоже 10. Но в cat /proc/sys/net/unix/max_dgram_qlen не 10. Я не понимаю как это работает...
 #fs.mqueue.msg_default. Нашёл
+
+
 event sendmsg
 params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    msg      @IN  : msghdr
+    msg      @IN  : msghdr-ref
     flags    @IN  : MsgFlags-set
     ret      @OUT : Int
 function 
-    sendmsg_generic(os, current, sockfd, msg, flags)
+    sendmsg_generic(os, current, sockfd, \deref(msg), flags)
 end
 
 event sendto //sendto
@@ -1249,11 +1296,11 @@ params
     buf      @IN  : void*
     len      @IN  : Nat
     flags    @IN  : MsgFlags-set
-    dst      @IN  : Sockaddr_un
+    dst      @IN  : Sockaddr_un-ref
     addrlen  @IN  : Nat
     ret      @OUT : Int    
 function
-    msg = mk_msg("msg_name = dst.address, msg_name_len = addrlen, ioveclist = &{buf, len}, msg_control = 0, msg_controllen = 0, msg_flags = flags")
+    msg = 'mk_msg(.msg_name = \deref(dst).address, .msg_name_len = addrlen, .msg_iov = \ref({buf, len}), .msg_control = 0, .msg_controllen = 0, .msg_flags = 0)'
     
     sendmsg_generic(os, current, sockfd, msg, flags)
 end
@@ -1270,9 +1317,9 @@ params
     flags    @IN  : MsgFlags-set
     ret      @OUT : Int
 function
-    #socket = get_sock_data(sockfd)
+    socket123 = get_sock_data(current, sockfd) # Там потом имя с socket из sendmsg_generic накладывается
     
-    msg = mk_msg("msg_name = socket.socket_peer.socket_address, msg_name_len = socket.socket_peer.socket_address_len, ioveclist = &{buf, len}, msg_control = 0, msg_controllen = 0, msg_flags = flags")
+    msg = 'mk_msg(.msg_name = socket123.socket_peer.socket_address, .msg_name_len = socket123.socket_peer.socket_address_len, .msg_iov = \ref({buf, len}), .msg_control = 0, .msg_controllen = 0, .msg_flags = 0)'
     
     sendmsg_generic(os, current, sockfd, msg, flags)
 end
@@ -1285,17 +1332,19 @@ params
     current @IN  : Process
     sockfd  @IN  : Nat
     buf     @IN  : void* # void *buf
-    count   @IN  : Nat  
+    count   @IN  : Nat
     ret     @OUT : Int
 function
-    msg = mk_msg("msg_name = socket.socket_peer.socket_address, msg_name_len = socket.socket_peer.socket_address_len, ioveclist = &{buf, count}, msg_control = 0, msg_controllen = 0, msg_flags = \emptyset")
+    socket123 = get_sock_data(current, sockfd) # Там потом имя с socket из sendmsg_generic накладывается
+    
+    msg = 'mk_msg(msg_name = socket123.socket_peer.socket_address, msg_name_len = socket123.socket_peer.socket_address_len, ioveclist = &{buf, count}, msg_control = 0, msg_controllen = 0, msg_flags = 0)'
     
     sendmsg_generic(os, current, sockfd, msg, \emptyset)
 end
 
 
 
-logical sended_buffers
+logical sended_buffers # Это алгоритм или logical?
 params
     os       @IN  : OS
     current  @IN  : Process
@@ -1303,36 +1352,121 @@ params
     sender   @IN  : Text
     list_idx @OUT : Int-list
 function
-    idx_list =  <. -1 .> # TODO: Вообще я хочу здесь коснтруировать с пустого списка. Но этого возможности не позволяют. Так что поступим костыльно: добавим -1, удалим -1.
+    idx_list = <. -1 .> # TODO: Вообще я хочу здесь коснтруировать с пустого списка. Но этого возможности не позволяют. Так что поступим костыльно: добавим -1, удалим -1.
 
     for (i in [0..\len(reciver.socket_buf)]) {
         if (sender == '0' || reciver.socket_buf(i).sender == sender) {//Если sender == 0. То берём первого попашегося. 
-        #TODO насчёт порядка не знаю. Но вроде в ядре там в основном работа через head и tail (через tail отправка, через head берём)
             add_to_list(idx_list, i)
         }
     }
     
-    del_from_list(idx_list, 0)
+    del_from_list(idx_list, 0) # TODO: Потому удалить
     
     return idx_list
-end  
+end
 
 #seqpacket в io ~ dgram
 
-logical get_data_from_buff
+event get_data
 params
-    buf            @IN  : sk_buff
+    reciver        @IN  : Socket
+    buffers_idx    @IN  : Nat-list
     msg            @IN  : msghdr
-    current_readed @IN  : Nat
-    ret            @OUT : Bool >< Bool
+    ret            @OUT : Nat
 function
-    * Создаётся msghdr. 
-    * В буферры iovec загружаются данные из buf_data
-    * Если сокет dgram или seq, то дополнительные данные копируются. Если stream, то если после чтения некторого числа данных получилось, что used ==  data_len, то скопируются и дополнительные данные. Дальнейшее чтение прекращается.
-    * Устанавливается размер дополнительных данных.
-    * Возращает Bool >< Bool, первые говорит достаточно ли данных считали, второй говорит удалять ли буффер (В случае STREAM чтения если чтение начато и не дочитано, до буфер не удаляется, во всех остальных случаях удаляется). Про первый: для датаграммы это был прочитан один буфер даже если не полностью (аналогично seqpacket). Для stream это либо прочитано до размера буффера получателя, либо прочитано до буффера в котором есть дополнительные данные, либо прочитано всё и читать больше нечего (этот случай подразумевает конец иттерации в основном цикле и здесь не описывается) 
-    * Модифицирует current_readed 
+    if (reciver.socket_type == SOCK_DGRAM || reciver.socket_type == SOCK_SEQPACKET) {
+        * Копируется первый пришедший буффер
+        * Первый пришедший буффер копируется в msg.msg_iov, последовательно заполняя буфееры в msg.msg_iov. Если буфер больше суммарной длинные iov, то оставшиеся данные в буффере игнорируются
+        * Если в первом буффере есть дополнительные данные, они копируются, с установлением их длинны
+        * Этот буффер удаляется из socket.socket_buf
+        * Отмечается освожодение памяти для отправителя после считывания буффера
+        * Возвращает число считанных данных
+
+#       buf = reciver.socket_buffer(buffers_idx(0)) // Первая пришедшая датаграмма
+#       
+        def copied : Nat := 0
+#              
+#       for (i in [0..msg.msg_iovlen-1]) {
+#           iov = msg.msg_iov(i)
+#      
+#           \def bytes_to_copy : Nat := 0 // TODO: min(iov.iov_len, buf.data_len)
+#           * copied := copied + memcpy(iov.iov_base, buf.buf_data, bytes_to_copy)
+#
+#           
+#           if (buf.control_len != 0) {
+#               //Если есть дополнительные данные, они загружаются
+#               * memcpy(msg.msg_control, buf.buf_control_data, min(msg.msg_controllen, buf.control_len))
+#               // Устанавливается размер дополнительных данных  
+#               msg.msg_controllen := min(msg.msg_controllen, buf.control_len)
+#           } else {
+#               // Если их нет, то буффер == null
+#               * msg.msg_control = null
+#               //Устанавливается размер дополнительных данных
+#               msg.msg.controllen := 0
+#           }
+#       }
+#       
+#       socket.socket_used_buffer := socket.socket_used_buffer - buf.data_len # В выделениях буффера учитываются только размеры данных
+#       del_from_list(socket.socket_buf, 0)
+#       
+        return copied
+    } else {// recvier.socket_type == SOCK_STREAM
+        # Всё, что ниже соотвствует следушющему текстовому описанию
+        * Просматриваются буфферы подходящие по отправителю (socket.socket_buf(buffer_idx)). Они там в порядке прихода сообщения. Просматриваются до тех пор, пока в сообщении не все буферы заполнены и пока буфферы для считывания есть и пока не встречен буффер с дополнительными данными (если буффер с дополнительными данными присутсвует, то он копируются данные и дополнительные данные, устанавливается размер дополнительных данных (в случае чего обрезаются), буфер удаляется и чтение прекращается)
+        * Данные из буфферов с индексами buffers_idx копируются в msg.msg_iov, последовательно заполняя буфееры в msg.msg_iov
+        * Прочитанные полностью буфферы удаляются из socket.socket_buf. Степень прочитанности буффера - sk_buff.consumed
+        * Отмечается освожодение памяти для отправителя после считывания буффера
+        * Возвращает число считанных данных
+        
+#       
+#       i = 0
+#       j = 0
+        def copied : Nat := 0
+#       cur_copied = 0
+#       iov = msg.msg_iov(j) # чтобы объявить iov в во вне цикла
+#       buf = socket.socket_buf(buffers_idx(i)) # аналогично
+#       
+#       while (i < \len(buffers_idx) - 1 && j < msg.msg_iovlen - 1) {
+#           * iov = msg.msg_iov(j)
+#           * buf = socket.socket_buf(buffers_idx(i))
+#           * bytes_to_copy = min(iov.iov_len - cur_copied, buf.data_len - buf.consumed)
+#           # Предполагаю, что адресная арифметика для void* (т.е. iov.iov_base) байтова (void *) + 1 - сдвиг адреса на единицу
+#           * cur_copied += memcpy(iov.iov_base + cur_copied, buf.buf_data + buf.consumed, bytes_to_copy)
+#           buf.consumed := buf.consumed + bytes_to_copy
+#           
+#           if (buf.buf_control_data != 0) {
+#               msg.msg_control = buf.control_buf
+#               msg.msg_controllen := buf.control_len
+#               
+#               other = find_socket(buf.sender)
+#               other.socket_used_buffer := other.socket_used_buffer - buf.data_len
+#               del_from_list(socket_buf, i)
+#               
+#               * copied += cur_copied
+#               *break
+#           }
+#           
+#           if (buf.consumed == buf.data_len) {
+#               other = find_socket(buf.sender)
+#               other.socket_used_buffer := other.socket_used_buffer - buf.data_len
+#               del_from_list(socket_buf, i) # Не нужно i++. Т.к. удаление уже смещение
+#           }
+#           
+#           if (iov.iov_len == cur_copied) {
+#               * j++
+#               * cur_copied = 0
+#               * copied += iov.iov_len
+#           }
+#       }
+#       
+#       if (iov.iov_len != cur_copied && msg.msg_controllen != 0) {
+#           *copied += cur_copied
+#       }
+#       
+        return copied     
+   }
 end
+    attr algorithm: 'Алгоритм получения данных.'
 
 
 
@@ -1343,10 +1477,12 @@ params
     sockfd   @IN  : Nat
     msg      @IN  : msghdr
     flags    @IN  : MsgFlags-set
+    src      @IN  : Sockaddr_un-ref # Эти два параметра нужны только для recvfrom
+    addrlen  @IN  : Nat-ref         # Эти два параметра нужны только для recvfrom
 function
     socket = get_sock_data(current, sockfd)
-    other  = get_other(os, msg.msg_name)
-    current_readed = 0
+    other  = get_by_address(os, msg.msg_name)
+
     
     current.proc_status := S
     wait INFWAIT {
@@ -1355,24 +1491,8 @@ function
             buffers_idx = sended_buffers(os, current, other, msg.msg_name)
             
             
-            i = 1 # TODO tmp пока нижнее не исправлю
-            #TODO: сделать так чтобы заработоло.
-            #for (i in [0..\len(buffers_idx)]) {
             
-                
-                pair = get_data_from_buff(socket.socket_buf(i), msg, current_readed)
-                
-                if (pair == (True, True)) {
-                    del_from_list(socket.socket_buf, i)
-                    * break
-                } elif (pair == (True, False)) {
-                    * break
-                } elif (pair == (False, True)) {
-                    del_from_list(socket.socket_buf, i)
-                }
-                
-                
-            #}
+            return get_data(socket, buffers_idx, msg)
         }
         
         trigger (interrupt_logical(current, socket)) { // Описание триггера для прерываний
@@ -1381,8 +1501,6 @@ function
             return -1   
         }
     }
-    
-    return current_readed
 end
 
 
@@ -1392,11 +1510,11 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    msg      @IN  : msghdr
+    msg      @IN  : msghdr-ref
     flags    @IN  : MsgFlags-set
     ret      @OUT : Int
 function
-    recvmsg_generic(os, current, sockfd, msg, flags)
+    recvmsg_generic(os, current, sockfd, \deref(msg), flags)
 end
 
 
@@ -1407,12 +1525,12 @@ params
     sockfd   @IN  : Nat
     buf      @IN  : void*
     len      @IN  : Nat
-    flags    @IN  : Nat-set #TODO
-    src      @IN  : Sockaddr_un
-    addrlen  @IN  : Nat
+    flags    @IN  : Nat-set
+    src      @IN  : Sockaddr_un-ref
+    addrlen  @IN  : Nat-ref
     ret      @OUT : Int  
 function
-    msg = mk_msg("msg_name = dst.address, msg_name_len = addrlen, ioveclist = &{buf, len}, msg_control = 0, msg_controllen = 0, msg_flags = flags")
+    msg = 'mk_msg(.msg_name = \deref(src).address, .msg_name_len = addrlen, .msg_iov = \ref({buf, len}), .msg_control = 0, .msg_controllen = 0, .msg_flags = 0)'
     
     recvmsg_generic(os, current, sockfd, msg, flags)
 end
@@ -1425,12 +1543,12 @@ params
     sockfd   @IN  : Nat
     buf      @IN  : void*
     len      @IN  : Nat
-    flags    @IN  : Nat-set #TODO
+    flags    @IN  : Nat-set
     ret      @OUT : Int  
 function
-    #socket = get_sock_data(sockfd)
+    socket123 = get_sock_data(current, sockfd)
     
-    msg = mk_msg("msg_name = socket.socket_peer.socket_address, msg_name_len = socket.socket_peer.socket_address_len, ioveclist = &{buf, len}, msg_control = 0, msg_controllen = 0, msg_flags = flags")
+    msg = 'mk_msg(.msg_name = socket123.socket_peer.socket_address, .msg_name_len = socket123.socket_peer.socket_address_len, .msg_iov = \ref({buf, len}), .msg_control = NULL, .msg_controllen = 0, .msg_flags = 0)'
     
     recvmsg_generic(os, current, sockfd, msg, flags)
 end
@@ -1442,11 +1560,13 @@ params
     os      @IN  : OS
     current @IN  : Process
     sockfd  @IN  : Nat
-    buf     @IN  : void* # void *buf
+    buf     @IN  : void*
     count   @IN  : Nat  
     ret     @OUT : Int
 function
-    msg = mk_msg("msg_name = socket.socket_peer.socket_address, msg_name_len = socket.socket_peer.socket_address_len, ioveclist = &{buf, count}, msg_control = 0, msg_controllen = 0, msg_flags = \emptyset")
+    socket123 = get_sock_data(current, sockfd)
+    
+msg = 'mk_msg(.msg_name = socket123.socket_peer.socket_address, .msg_name_len = socket123.socket_peer.socket_address_len, .msg_iov = \ref({buf, len}), .msg_control = 0, .msg_controllen = 0, .msg_flags = 0)'
     
     sendmsg_generic(os, current, sockfd, msg, \emptyset)
 end
@@ -1464,11 +1584,10 @@ params
 function
     socket = get_sock_data(current, sockfd)
 
-    if (\deref(addrlen) > socket_addrlen) {
+    if (\deref(addrlen) > socket.socket_addrlen) {
         \deref(address) := socket.socket_peer.socket_address
-    } else { // Buffer is too small
+    } else { // Buffer is too sma   ll
         \deref(address) := 0 // Truncate address 
-        # Ошибочная ситуация?       
     }
     
     \deref(addrlen) := socket_addrlen
@@ -1585,7 +1704,7 @@ params
     file    @IN  : Text
     res     @OUT : Bool
 function
-
+    * Нужно выделять в строке подстроку и проверить x на директориях и w на файле
 end
 
 
