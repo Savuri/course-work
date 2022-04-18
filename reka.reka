@@ -1,5 +1,5 @@
 # 3 перевода строки - разделение между объектами/событиями
-# 1 перевода строки разделение между артрибутами
+# 1 перевода строки разделение между атрибутами
 module 'Абстрактные модели'
   attr target_object: 'система'
 
@@ -389,16 +389,16 @@ objattr socket_buf : sk_buff-list is
 **socket_buf_list** - буффер сокета.
 end
 
-objattr socket_buf_len : Nat is
-**socket_buf_len** - количество sk_buff в списке socket_buf.
-end
-
 objattr socket_so_sndbuf : Nat is
 **socket_so_buff** - размер буффера сокета. Значение, получаемое getsockopt() с SO_SNDBUF
 end
 
 objattr socket_used_buffer : Nat is
 **socket_used_buffer** - уже использованный количество байт буффера.
+end
+
+objattr socket_cur_buffer_cnt : Nat is
+**socket_cur_buffer_cnt** - количество уже выделенных буфферов.
 end
 
 type AddressFamily:
@@ -461,6 +461,26 @@ const DEFAULT_SO_SNDBUF : Nat // Значение в /proc/sys/net/core/wmem_def
 const MAX_SO_SNDBUF : Nat // Значение в /proc/sys/net/core/wmem_max
 
 
+logical to_sockaddr_ref
+params
+    prm1 @IN  : void*
+    ret  @OUT : Sockaddr_un-ref
+function
+    * Преобразует указатель в Sockaddr_un-ref
+end
+
+
+
+logical to_nat_ref
+params
+    prm1 @IN  : void*
+    ret  @OUT : Nat-ref
+function
+    * Преобразует указатель в nat-ref
+end
+
+
+
 action add_to_list // Добавить элемент в список l (по стратегии fifo).
 params
     T @TYPE
@@ -516,24 +536,36 @@ end
 
 
 # Для сокращения записи
-logical get_sock_data // получить структуру данных для процесса current и сокета sockfd.
+action get_sock_data // получить структуру данных для процесса current и сокета sockfd.
 params
-    current              @IN  : Process
-    sockfd               @IN  : Nat
-    sock @OUT : Socket
+    current @IN  : Process
+    sockfd  @IN  : Nat
+    sock    @OUT : Socket
 function
-    return current.proc_fds(sockfd).fd_open_file_ref.of_private_data 
+    sock = current.proc_fds(sockfd).fd_open_file_ref.of_private_data 
 end
 
 
+# Для сокращения
+action get_by_address
+params
+    os        @IN  : OS
+    sock_addr @IN  : Text
+    sock      @OUT : Socket
+function 
+    sock = os.os_socket_table(sock_addr)
+end
+
+
+
 # Для сокращения записи
-logical get_open_file // получить открытый файл для процесс current и сокета fd.
+action get_open_file // получить открытый файл для процесс current и сокета fd.
 params
     current @IN  : Process
     fd      @IN  : Nat
     of      @OUT : OpenFile
 function
-    return \deref current.proc_fds(fd).fd_open_file_ref
+    of = \deref current.proc_fds(fd).fd_open_file_ref
 end
 
 action add_to_map
@@ -567,7 +599,7 @@ const MAX_OPEN_FILES   : Nat // Максимальное число открыт
 
 
 const NULL : void*
-
+const NotInit
 
 event socket // socket
 params
@@ -581,7 +613,7 @@ invariant domain == AF_UNIX // Модель только для UNIX сокет�
 invariant current \isin os.os_proceses // Текущей процесс существует в рамках системы
 function
     forany(newFD : Nat | newFD \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD) => nn \isin \dom(current.proc_fds)) {
-    socket = 'mk_socket(.socket_status=UNCONNECTED, .socket_address=Nothing, .socket_addrlen=Nothing, .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=Nothing, .socket_flags={. .}, .socket_type=Nothing, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(), .socket_buf_len=0, socket_so_sndbuf=DEFAULT_SO_SNDBUF, .socket_used_buffer=0)'
+    socket = 'mk_socket(.socket_status=UNCONNECTED, .socket_address=Nothing, .socket_addrlen=Nothing, .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=Nothing, .socket_flags={. .}, .socket_type=Nothing, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(), socket_so_sndbuf=DEFAULT_SO_SNDBUF, .socket_used_buffer=0, .socket_cur_buffer_cnt=0)'
         
         if (SOCK_DGRAM \isin sock_type || SOCK_RAW \isin sock_type) {
             socket.socket_type := SOCK_DGRAM
@@ -591,7 +623,7 @@ function
            socket.socket_type := SOCK_SEQPACKET
         }
         
-        openfile = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Null, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket)'    
+        openfile = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=NotInit, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket)'    
             
         if (SOCK_NONBLOCK \isin sock_type) {
             add_to_set(openfile.of_flags, O_NONBLOCK)
@@ -651,8 +683,8 @@ params
     addrlen  @IN  : Nat
     ret      @OUT : Int
 function
-    socket = get_sock_data(current, sockfd)
-    openfile = get_open_file(current, sockfd)
+    get_sock_data(current, sockfd, socket)
+    get_open_file(current, sockfd, openfile)
 
     sock_address = make_path_abs(current, \deref(sockaddr).sun_path)
 
@@ -682,7 +714,7 @@ params
     backlog  @IN  : Int
     ret      @OUT : Int
 function
-    socket = get_sock_data(current, sockfd)
+    get_sock_data(current, sockfd, socket)
 
     if (backlog > SOMAXCONN) {
         socket.socket_backlog := SOMAXCONN
@@ -697,6 +729,27 @@ end
 
 
 
+logical is_free_space_in_backlog
+params
+    pre_state  @IN  : Universe
+    post_state @IN  : Universe
+    server     @IN  : Socket
+    res        @OUT : Bool
+end
+    attr event-desc: Появилось место для постановки себя в очередь на подключение (\len(server.socket_queue) < server.socket_backlog)
+
+
+
+logical was_accepted
+params
+    pre_state  @IN  : Universe
+    post_state @IN  : Universe
+    server     @IN  : Socket
+    socket     @IN  : Socket
+    res        @OUT : Bool 
+end
+    attr event-desc: Запрос на подключение был принят сервером. (socket \notisin server.socket_queue).
+
 event connect // systemcall connect
 params
     os       @IN  : OS
@@ -707,15 +760,17 @@ params
     ret      @OUT : Int 
 function
     #Комментарий из кода -> Фича Linux: If possible we block in connect(2) if the max backlog of the listen socket is been reached. This won't break old apps and it will avoid huge amount of socks hashed (this for unix_gc() performances reasons).
-    socket = get_sock_data(current, sockfd)
-    server = get_by_address(os, \deref(sockaddr).sun_path)
+    get_sock_data(current, sockfd, socket)
+    get_by_address(os, \deref(sockaddr).sun_path, server)
 
     if (socket.socket_type == SOCK_STREAM || socket.socket_type == SOCK_SEQPACKET) {
         socket.socket_status := CONNECTING
         
         current.proc_status := S
+        
+       
         wait INFWAIT {
-            trigger (\len(server.socket_queue) < server.socket_backlog) { // текст для триггера 1
+            trigger (is_free_space_in_backlog(server)) { // текст для триггера 1
                 current.proc_status := R
                 add_to_list(server.socket_queue, socket) 
             }
@@ -730,15 +785,15 @@ function
         current.proc_status := S
         
         wait INFWAIT {
-            trigger (server.socket_queue(0) == socket) { // текст для триггера 1
-                socket.socket_status := CONNECTED
-                socket.socket_peer := socket
+            trigger (was_accepted(server, socket)) { // текст для триггера 1
+                #socket.socket_status := CONNECTED -- устанавливает это сервер (в accept)
+                #socket.socket_peer := -- устанавливает это сервер.
                 del_from_list(server.socket_queue, 0)
                 current.proc_status := R
             }
                 
             trigger (interrupt_logical(current, socket)) { // текст для триггера 2
-                # Описать подчищивание надо? я про верхний wait TODO(??)
+                # Описать подчищивание надо? я про верхний wait. TODO(??)
                 current.proc_errno := EINTR
                 current.proc_status := R
                 return -1
@@ -746,10 +801,22 @@ function
         }
     } else {
         socket.socket_peer := server
+        socket.socket_status := CONNECTED
     }
     
     return 0    
 end
+
+
+
+logical backlog_is_not_empty
+params
+    pre_state  @IN  : Universe
+    post_state @IN  : Universe
+    server     @IN  : Socket
+    res        @OUT : Bool
+end
+    attr event-desc: Появился запрос на подключение (server.socket_queue != <..>)
 
 
 
@@ -764,26 +831,26 @@ params
     addrlen  @IN  : Nat-ref
     ret      @OUT : Int
 function
-    socket = get_sock_data(current, sockfd)
+    get_sock_data(current, sockfd, socket)
    
     current.proc_status := S
     wait INFWAIT { 
-        trigger (socket.socket_queue != <..>) { // текст для триггера 1. Есть кого принимать
+        trigger (backlog_is_not_empty(socket)) { // текст для триггера 1. Есть кого принимать
             current.proc_status := R
             peer = get_list_head(socket.socket_queue) // Тот, кто подсоединяется
             forany(newFD : Nat | newFD \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD) => nn \isin \dom(current.proc_fds)) { // Создаются fd, OpenFile, Socket. Причём все поля у новых OpenFile и Socket такие же, как и у этих же объектов соотвестующих sockfd. 
                 forany(newUnixAddress : Text | newUnixAddress \notisin \dom(os.os_socket_table) && newUnixAddress(0) == '\0') {
-                    new_socket = 'mk_socket(.socket_status=CONNECTED, .socket_address=newUnixAddress, .socket_addrlen=\len(newUnixAddress), .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=peer, .socket_flags={. .}, .socket_type=socket.socket_type, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(), .socket_buf_len=0, socket_so_sndbuf=socket.socket_so_sndbuf, .socket_used_buffer=0)'
+                    new_socket = 'mk_socket(.socket_status=CONNECTED, .socket_address=newUnixAddress, .socket_addrlen=\len(newUnixAddress), .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=peer, .socket_flags={. .}, .socket_type=socket.socket_type, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(),  socket_so_sndbuf=socket.socket_so_sndbuf, .socket_used_buffer=0, .socket_cur_buffer_cnt=0)'
                 
                     peer.socket_peer := new_socket
                     peer.socket_status := CONNECTED
                     
-                    if (sockaddr != NULL) { //sockaddr != NULL
+                    if (sockaddr != to_sockaddr_ref(NULL)) { //sockaddr != NULL
                         * strncmp(\ref(\deref(sockaddr).sun_path), \ref(newUnixAddress), min(\len(newUnixAddress, \deref(addrlen)))
                         \deref(addrlen) := \len(newUnixAddress)      
                     }
 
-                    openfile = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Null, .of_ref_cnt=1, of_flags={. O_RDWR .}, .of_private_data=socket)'    
+                    openfile = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=NotInit, .of_ref_cnt=1, of_flags={. O_RDWR .}, .of_private_data=socket)'    
                     newFDObject = 'mk_Fd(.fd_open_file_ref=\ref(openfile), .fd_flags={. .})'
 
                     add_to_map(current.proc_fds, newFD, newFDObject)
@@ -814,8 +881,8 @@ params
 invariant current.proc_fds(fd).fd_open_file_ref.of_ref_cnt >= 1// Если у файла ref_cnt == 0, то его в этой таблице быть не должно 
 invariant current.proc_fds(fd).fd_open_file_ref.of_type == SOCKET_TYPE// Вызов рассматривается только для сокетов
 function
-    socket = get_sock_data(current, fd)
-    open_file = get_open_file(current, fd)
+    get_sock_data(current, fd, socket)
+    get_open_file(current, fd, open_file)
 
     remove_from_map(current.proc_fds, fd)
     open_file.of_ref_cnt--
@@ -848,7 +915,8 @@ params
     how      @IN  : ShutdownParam
     ret      @OUT : Int
 function
-    peer = get_sock_data(current, sockfd).socket_peer
+    get_sock_data(current, sockfd, socket)
+    peer = socket.socket_peer
 
     if (how == SHUT_RD) {
         add_to_set(peer.socket_shutdown_flags, SEND_SHUTDOWN)  
@@ -878,8 +946,8 @@ function
         forany(newFD2 : Nat | newFD2 \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD2) => nn \isin \dom(current.proc_fds)) {
             forany(newUnixAddress1 : Text | newUnixAddress1 \notisin \dom(os.os_socket_table) && newUnixAddress1(0) == '\0') {
                 forany(newUnixAddress2 : Text | newUnixAddress2 \notisin \dom(os.os_socket_table) && newUnixAddress2(0) == '\0') {
-                    socket1 =  'mk_socket(.socket_status=CONNECTED, .socket_address=newUnixAddress1, .socket_addrlen=\len(newUnixAddress1), .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=Nothing, .socket_flags={. .}, .socket_type=Nothing, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(), .socket_buf_len=0, socket_so_sndbuf=DEFAULT_SO_SNDBUF, .socket_used_buffer=0)'
-                    socket2 =  'mk_socket(.socket_status=CONNECTED, .socket_address=newUnixAddress2, .socket_addrlen=\len(newUnixAddress2), .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=Nothing, .socket_flags={. .}, .socket_type=Nothing, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(), .socket_buf_len=0, socket_so_sndbuf=DEFAULT_SO_SNDBUF, .socket_used_buffer=0)'
+                    socket1 =  'mk_socket(.socket_status=CONNECTED, .socket_address=newUnixAddress1, .socket_addrlen=\len(newUnixAddress1), .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=Nothing, .socket_flags={. .}, .socket_type=Nothing, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(),  socket_so_sndbuf=DEFAULT_SO_SNDBUF, .socket_used_buffer=0, .socket_cur_buffer_cnt=0)'
+                    socket2 =  'mk_socket(.socket_status=CONNECTED, .socket_address=newUnixAddress2, .socket_addrlen=\len(newUnixAddress2), .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=Nothing, .socket_flags={. .}, .socket_type=Nothing, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(),  socket_so_sndbuf=DEFAULT_SO_SNDBUF, .socket_used_buffer=0, .socket_cur_buffer_cnt=0)'
                     socket1.socket_peer := socket2
                     socket2.socket_peer := socket1
                     
@@ -894,8 +962,8 @@ function
                         socket2.socket_type := SOCK_SEQPACKET
                     }
                     
-                    openfile1 = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Null, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket1)'
-                    openfile2 = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Null, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket2)'    
+                    openfile1 = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=NotInit, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket1)'
+                    openfile2 = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=NotInit, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket2)'    
                         
                     if (SOCK_NONBLOCK \isin sock_type) {
                         add_to_set(openfile1.of_flags, O_NONBLOCK)
@@ -1078,17 +1146,6 @@ endtype
 
 
 
-logical connection_request
-params
-    pre_state  @IN  : Universe
-    post_state @IN  : Universe
-    server     @IN  : Socket
-    res        @OUT : Bool
-end
-    attr event-desc: Прерывание ожидания процесса, из-за прихода запроса на подключение (server.socket_queue != <..>)
-
-
-
 logical interrupt_logical
 params
     pre_state  @IN  : Universe
@@ -1127,19 +1184,7 @@ is
 endtype
 
 
-
-logical get_by_address
-params
-    os        @IN  : OS
-    sock_addr @IN  : Text
-    sock      @OUT : Socket
-function 
-    return os.os_socket_table(sock_addr)
-end
-
-
-
-logical msg_max_queue # Я не знаю как это получить. Оно зависит от SO_SNDBUF текущего сокета => Параметр - сокет-отправитель
+logical max_msg_cnt # Я не знаю как это получить. Оно зависит от SO_SNDBUF текущего сокета => Параметр - сокет-отправитель
 params
     sock @IN  : Socket
     ret  @OUT : Nat
@@ -1163,28 +1208,19 @@ function
     return _res
 end
     attr algorithm: 'Алгоритм, считающий размер данных в msg'
-    
 
 
-logical mk_msg
-params
-    prm1 @IN  : Text
-    ret  @OUT : msghdr
-function
-    * Создаёт и инициализирует msghdr согласно prm1. TODO: заменить на встроенный mk, когда появится.
-end
 
-
-#TODO: убрать memcpyn 
+#TODO: убрать memcpy
 event load_data
 params
     msg     @IN  : msghdr
-    socket  @IN  : Socket
+    sender  @IN  : Socket
     reciver @IN  : Socket
 function
-    socket.socket_type := reciver.socket_type
-    buf = 'mk_skbuff(".buf_data = alloc_ptr(), .data_len = 0, .consumed = 0, buf_control_data = alloc_prt(), control_len = 0", .sender = socket.socket_address)' // Устанавливается адрес отправителя
-    socket.socket_used_buffer := socket_used_buffer + get_msg_len(msg) //(Отмечается изменение использованного пространства буффера данного сокета)
+    buf = 'mk_skbuff(".buf_data = alloc_ptr(), .data_len = 0, .consumed = 0, buf_control_data = alloc_prt(), control_len = 0", .sender = sender.socket_address)' // Устанавливается адрес отправителя
+    sender.socket_used_buffer := sender.socket_used_buffer + get_msg_len(msg) //(Отмечается изменение использованного пространства буффера данного сокета)
+    sender.socket_cur_buffer_cnt++
     
     for (i in [0..msg.msg_iovlen]) {
         // Данные просматриваются последовательно и загружаются подряд
@@ -1206,9 +1242,21 @@ function
     }
     
     add_to_list(reciver.socket_buf, buf)
-    reciver.socket_buf_len++
+
 end
     attr algorithm: 'Алгоритм загрузки данных'
+
+
+
+logical is_possible_to_load_data
+params
+    pre_state  @IN  : Universe
+    post_state @IN  : Universe
+    sender     @IN  : Socket
+    reciver    @IN  : Socket
+    res        @OUT : Bool
+end
+    attr event-desc: Ждём освобождение места в буффера отправителя. (sender.socket_cur_buffer_cnt < max_msg_cnt(sender) || get_msg_len(msg) < socket.socket_so_sndbuf / 2 - socket.socket_used_buffer)
 
 
 
@@ -1217,16 +1265,16 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    msg      @IN  : msghdr-ref
+    msg      @IN  : msghdr
     flags    @IN  : MsgFlags-set
     ret      @OUT : Int
 function
-    socket = get_sock_data(current, sockfd)
-    other = get_by_address(os, msg.msg_name)
+    get_sock_data(current, sockfd, socket)
+    get_by_address(os, msg.msg_name, other)
 
     current.proc_status := S
     wait INFWAIT {
-        trigger (other.socket_buf_len < msg_max_queue(socket) || get_msg_len(msg) < socket.socket_so_sndbuf / 2 - socket.socket_used_buffer) {//сообщение для тригерра 1
+        trigger (is_possible_to_load_data(socket, other)) {//сообщение для тригерра 1
             current.proc_status := R
             load_data(msg, socket, other)
         }
@@ -1317,7 +1365,7 @@ params
     flags    @IN  : MsgFlags-set
     ret      @OUT : Int
 function
-    socket123 = get_sock_data(current, sockfd) # Там потом имя с socket из sendmsg_generic накладывается
+    get_sock_data(current, sockfd, socket123) # Там потом имя с socket из sendmsg_generic накладывается
     
     msg = 'mk_msg(.msg_name = socket123.socket_peer.socket_address, .msg_name_len = socket123.socket_peer.socket_address_len, .msg_iov = \ref({buf, len}), .msg_control = 0, .msg_controllen = 0, .msg_flags = 0)'
     
@@ -1335,138 +1383,158 @@ params
     count   @IN  : Nat
     ret     @OUT : Int
 function
-    socket123 = get_sock_data(current, sockfd) # Там потом имя с socket из sendmsg_generic накладывается
+    get_sock_data(current, sockfd, socket123) # Там потом имя с socket из sendmsg_generic накладывается
     
     msg = 'mk_msg(msg_name = socket123.socket_peer.socket_address, msg_name_len = socket123.socket_peer.socket_address_len, ioveclist = &{buf, count}, msg_control = 0, msg_controllen = 0, msg_flags = 0)'
     
     sendmsg_generic(os, current, sockfd, msg, \emptyset)
 end
 
-
-
-logical sended_buffers # Это алгоритм или logical?
-params
-    os       @IN  : OS
-    current  @IN  : Process
-    reciver  @IN  : Socket
-    sender   @IN  : Text
-    list_idx @OUT : Int-list
-function
-    idx_list = <. -1 .> # TODO: Вообще я хочу здесь коснтруировать с пустого списка. Но этого возможности не позволяют. Так что поступим костыльно: добавим -1, удалим -1.
-
-    for (i in [0..\len(reciver.socket_buf)]) {
-        if (sender == '0' || reciver.socket_buf(i).sender == sender) {//Если sender == 0. То берём первого попашегося. 
-            add_to_list(idx_list, i)
-        }
-    }
-    
-    del_from_list(idx_list, 0) # TODO: Потому удалить
-    
-    return idx_list
-end
-
 #seqpacket в io ~ dgram
+event min
+params
+    lhs @IN  : Int
+    rhs @IN  : Int
+    res @OUT : Int
+function
+    if (lhs < rhs) {
+        return lhs
+    } else {
+        return rhs
+    }
+end
+    attr algorithm: 'Алгоритм получения минимального среди двух Int.'
 
+
+#TODO доделать (get_by_address в алгоритме не работает) + memcpy
 event get_data
 params
-    reciver        @IN  : Socket
-    buffers_idx    @IN  : Nat-list
-    msg            @IN  : msghdr
-    ret            @OUT : Nat
+    os      @IN  : OS
+    reciver @IN  : Socket
+    msg     @IN  : msghdr-ref
+    ret     @OUT : Nat
 function
-    if (reciver.socket_type == SOCK_DGRAM || reciver.socket_type == SOCK_SEQPACKET) {
-        * Копируется первый пришедший буффер
-        * Первый пришедший буффер копируется в msg.msg_iov, последовательно заполняя буфееры в msg.msg_iov. Если буфер больше суммарной длинные iov, то оставшиеся данные в буффере игнорируются
-        * Если в первом буффере есть дополнительные данные, они копируются, с установлением их длинны
-        * Этот буффер удаляется из socket.socket_buf
-        * Отмечается освожодение памяти для отправителя после считывания буффера
-        * Возвращает число считанных данных
+    def copied : Nat := 0
+    def i : Nat := 0
+    def iov : iovec
 
-#       buf = reciver.socket_buffer(buffers_idx(0)) // Первая пришедшая датаграмма
-#       
-        def copied : Nat := 0
-#              
-#       for (i in [0..msg.msg_iovlen-1]) {
-#           iov = msg.msg_iov(i)
-#      
-#           \def bytes_to_copy : Nat := 0 // TODO: min(iov.iov_len, buf.data_len)
-#           * copied := copied + memcpy(iov.iov_base, buf.buf_data, bytes_to_copy)
-#
-#           
-#           if (buf.control_len != 0) {
-#               //Если есть дополнительные данные, они загружаются
-#               * memcpy(msg.msg_control, buf.buf_control_data, min(msg.msg_controllen, buf.control_len))
-#               // Устанавливается размер дополнительных данных  
-#               msg.msg_controllen := min(msg.msg_controllen, buf.control_len)
-#           } else {
-#               // Если их нет, то буффер == null
-#               * msg.msg_control = null
-#               //Устанавливается размер дополнительных данных
-#               msg.msg.controllen := 0
-#           }
-#       }
-#       
-#       socket.socket_used_buffer := socket.socket_used_buffer - buf.data_len # В выделениях буффера учитываются только размеры данных
-#       del_from_list(socket.socket_buf, 0)
-#       
+    if (reciver.socket_type == SOCK_DGRAM || reciver.socket_type == SOCK_SEQPACKET) {
+        # Копируется первый пришедший буффер
+        # Первый пришедший буффер копируется в msg.msg_iov, последовательно заполняя буфееры в msg.msg_iov. Если буфер больше суммарной длинные iov, то оставшиеся данные в буффере игнорируются
+        # Если в первом буффере есть дополнительные данные, они копируются, с установлением их длинны
+        # Этот буффер удаляется из socket.socket_buf
+        # Отмечается освожодение памяти для отправителя после считывания буффера
+        # Возвращает число считанных данных
+        # в msg.msg_name загружается адрес отправителя (если изначального буффера не хватает, msg_name зануляется и устанавливается кореектный размер в msg.msg_namelen
+        # в msg.msg_namelen длина адреса отправителя
+
+        
+        buf = reciver.socket_buf(0) // Первая пришедшая датаграмма
+        'get_by_address(os, buf.sender, sender)' // Отправитель
+
+        while ('i < \deref(msg).msg_iovlen && buf.consumed < buf.data_len') { #TODO while с двумя условиями
+            iov := \deref(msg).msg_iov(i)
+            cur_dgram_copied = min(iov.iov_len,  buf.data_len - buf.consumed)
+            
+            * copied := copied + memcpy(iov.iov_base, buf.buf_data + buf.consumed, cur_dgram_copied)
+            
+            buf.consumed := buf.consumed + cur_dgram_copied
+            
+            if (cur_dgram_copied == iov.iov_len) {
+                i++
+            }
+        }
+        
+        if (buf.control_len != 0) {
+            //Если есть дополнительные данные, они загружаются
+            * memcpy(\ref(\deref(msg).msg_control), \ref(buf.buf_control_data), min(msg.msg_controllen, buf.control_len))
+            // Устанавливается размер дополнительных данных  
+            \deref(msg).msg_controllen := min(\deref(msg).msg_controllen, buf.control_len)
+        } else {
+            // Если их нет, то буффер == null
+            \deref(msg).msg_control := NULL
+            //Устанавливается размер дополнительных данных
+            \deref(msg).msg_controllen := 0
+        }
+        
+        'sender.socket_used_buffer := sender.socket_used_buffer - buf.data_len' // Освобождается память в буффере отправителя для последующих сообщений.
+        'sender.socket_cur_buffer_cnt--'
+        del_from_list(reciver.socket_buf, 0) // Прочитанная датаграмма удаляется.
+        
         return copied
     } else {// recvier.socket_type == SOCK_STREAM
-        # Всё, что ниже соотвствует следушющему текстовому описанию
-        * Просматриваются буфферы подходящие по отправителю (socket.socket_buf(buffer_idx)). Они там в порядке прихода сообщения. Просматриваются до тех пор, пока в сообщении не все буферы заполнены и пока буфферы для считывания есть и пока не встречен буффер с дополнительными данными (если буффер с дополнительными данными присутсвует, то он копируются данные и дополнительные данные, устанавливается размер дополнительных данных (в случае чего обрезаются), буфер удаляется и чтение прекращается)
-        * Данные из буфферов с индексами buffers_idx копируются в msg.msg_iov, последовательно заполняя буфееры в msg.msg_iov
-        * Прочитанные полностью буфферы удаляются из socket.socket_buf. Степень прочитанности буффера - sk_buff.consumed
-        * Отмечается освожодение памяти для отправителя после считывания буффера
-        * Возвращает число считанных данных
+        # Всё, что ниже соотвствует следушющему текстовому описанию:
+        # Просматриваются буфферы. Они там в порядке прихода сообщения. Просматриваются до тех пор, пока в сообщении не все буферы заполнены и пока буфферы для считывания есть и пока не встречен буффер с дополнительными данными (если буффер с дополнительными данными присутсвует, то копируются данные и дополнительные данные, устанавливается размер дополнительных данных (в случае чего обрезаются), буфер удаляется и чтение прекращается)
+        # Данные из буфферов копируются в msg.msg_iov, последовательно заполняя буфееры в msg.msg_iov
+        # Прочитанные полностью буфферы удаляются из socket.socket_buf. Степень прочитанности буффера - sk_buff.consumed
+        # Отмечается освожодение памяти для отправителя после считывания буффера
+        # Возвращает число считанных данных
+        # в msg.msg_name загружается адрес отправителя (если изначального буффера не хватает, msg_name зануляется и устанавливается кореектный размер в msg.msg_namelen
+        # в msg.msg_namelen длина адреса отправителя
         
-#       
-#       i = 0
-#       j = 0
-        def copied : Nat := 0
-#       cur_copied = 0
-#       iov = msg.msg_iov(j) # чтобы объявить iov в во вне цикла
-#       buf = socket.socket_buf(buffers_idx(i)) # аналогично
-#       
-#       while (i < \len(buffers_idx) - 1 && j < msg.msg_iovlen - 1) {
-#           * iov = msg.msg_iov(j)
-#           * buf = socket.socket_buf(buffers_idx(i))
-#           * bytes_to_copy = min(iov.iov_len - cur_copied, buf.data_len - buf.consumed)
-#           # Предполагаю, что адресная арифметика для void* (т.е. iov.iov_base) байтова (void *) + 1 - сдвиг адреса на единицу
-#           * cur_copied += memcpy(iov.iov_base + cur_copied, buf.buf_data + buf.consumed, bytes_to_copy)
-#           buf.consumed := buf.consumed + bytes_to_copy
-#           
-#           if (buf.buf_control_data != 0) {
-#               msg.msg_control = buf.control_buf
-#               msg.msg_controllen := buf.control_len
-#               
-#               other = find_socket(buf.sender)
-#               other.socket_used_buffer := other.socket_used_buffer - buf.data_len
-#               del_from_list(socket_buf, i)
-#               
-#               * copied += cur_copied
-#               *break
-#           }
-#           
-#           if (buf.consumed == buf.data_len) {
-#               other = find_socket(buf.sender)
-#               other.socket_used_buffer := other.socket_used_buffer - buf.data_len
-#               del_from_list(socket_buf, i) # Не нужно i++. Т.к. удаление уже смещение
-#           }
-#           
-#           if (iov.iov_len == cur_copied) {
-#               * j++
-#               * cur_copied = 0
-#               * copied += iov.iov_len
-#           }
-#       }
-#       
-#       if (iov.iov_len != cur_copied && msg.msg_controllen != 0) {
-#           *copied += cur_copied
-#       }
-#       
+        def cur_iov_base_size : Nat := 0 # cur_len of current iov
+        
+        while ('i < \deref(msg).msg_iovlen && socket.socket_buf != <. .>') {
+            buf = reciver.socket_buf(0)
+            
+            
+            def cur_stream_copied : Nat := 0
+            # copy one socket buff
+            while ('i < \deref(msg).msg_iovlen && buf.consumed < buf.data_len') {
+                iov := \deref(msg).msg_iov(i)
+            
+                bytes_to_copy = min(iov.iov_len - cur_iov_base_size, buf.data_len - buf.consumed)
+                
+                cur_stream_copied := cur_stream_copied + bytes_to_copy
+                
+                # Предполагаю, что адресная арифметика для void* (т.е. iov.iov_base) байтова (void *) + 1 - сдвиг адреса на единицу
+                * cur_iov_base_size := cur_iov_base_size + memcpy(iov.iov_base + cur_iov_base_size, buf.buf_data + buf.consumed, bytes_to_copy)
+                buf.consumed := buf.consumed + bytes_to_copy
+            
+                if (cur_iov_base_size == iov.iov_len) {
+                    cur_iov_base_size := 0
+                    i++
+                }
+            }
+            
+            copied := copied + cur_stream_copied
+            cur_stream_copied := 0
+            
+            if (buf.buf_control_data != NULL) { // Если есть дополнительные данные
+                // Копируются дополнительный данные
+                * memcpy(\ref(\deref(msg).msg_control), \ref(buf.buf_control_data), min(msg.msg_controllen, buf.control_len))
+                msg.msg_controllen := buf.control_len
+                
+                // Освобождаются ресурсы
+                'get_by_address(os, buf.sender, other)'
+                'other.socket_used_buffer := other.socket_used_buffer - buf.data_len'
+                'other.socket_cur_buffer_cnt--'
+                del_from_list(socket_buf, 0)
+                
+                //Заверешение иттерации
+                return copied  
+            } elif (buf.consumed == buf.data_len) {
+                'get_by_address(os, buf.sender, other)'
+                'other.socket_used_buffer := other.socket_used_buffer - buf.data_len'
+                'other.socket_cur_buffer_cnt--'
+                del_from_list(socket_buf, 0)
+            }
+        }
+        
         return copied     
    }
 end
     attr algorithm: 'Алгоритм получения данных.'
+
+
+
+logical msg_have_come
+params
+    pre_state  @IN  : Universe
+    post_state @IN  : Universe
+    server     @IN  : Socket
+end
+    attr event-desc: Появилось сообщения для считывания в буффере. (server.socket_buf != <. .>))
 
 
 
@@ -1477,22 +1545,23 @@ params
     sockfd   @IN  : Nat
     msg      @IN  : msghdr
     flags    @IN  : MsgFlags-set
-    src      @IN  : Sockaddr_un-ref # Эти два параметра нужны только для recvfrom
-    addrlen  @IN  : Nat-ref         # Эти два параметра нужны только для recvfrom
+    src      @IN  : Sockaddr_un-ref
+    addrlen  @IN  : Nat-ref
 function
-    socket = get_sock_data(current, sockfd)
-    other  = get_by_address(os, msg.msg_name)
-
+    get_sock_data(current, sockfd, socket)
     
     current.proc_status := S
     wait INFWAIT {
-        trigger (sended_buffers(os, current, other, msg.msg_name) != <. .>) { // Описание триггера 1
+        trigger (msg_have_come(socket)) { // Описание триггера 1
             current.proc_status := R
-            buffers_idx = sended_buffers(os, current, other, msg.msg_name)
+            res = get_data(os, socket, \ref(msg))
             
+            if (src != to_sockaddr_ref(NULL) && addrlen != to_nat_ref(NULL)) {
+                \deref(src)     := msg.msg_name
+                \deref(addrlen) := msg.msg_namelen
+            }
             
-            
-            return get_data(socket, buffers_idx, msg)
+            return res
         }
         
         trigger (interrupt_logical(current, socket)) { // Описание триггера для прерываний
@@ -1514,7 +1583,7 @@ params
     flags    @IN  : MsgFlags-set
     ret      @OUT : Int
 function
-    recvmsg_generic(os, current, sockfd, \deref(msg), flags)
+    recvmsg_generic(os, current, sockfd, \deref(msg), flags, to_sockaddr_ref(NULL), to_nat_ref(NULL))
 end
 
 
@@ -1532,7 +1601,7 @@ params
 function
     msg = 'mk_msg(.msg_name = \deref(src).address, .msg_name_len = addrlen, .msg_iov = \ref({buf, len}), .msg_control = 0, .msg_controllen = 0, .msg_flags = 0)'
     
-    recvmsg_generic(os, current, sockfd, msg, flags)
+    recvmsg_generic(os, current, sockfd, msg, flags, src, addrlen)
 end
 
 
@@ -1546,11 +1615,11 @@ params
     flags    @IN  : Nat-set
     ret      @OUT : Int  
 function
-    socket123 = get_sock_data(current, sockfd)
+    get_sock_data(current, sockfd, socket123)
     
-    msg = 'mk_msg(.msg_name = socket123.socket_peer.socket_address, .msg_name_len = socket123.socket_peer.socket_address_len, .msg_iov = \ref({buf, len}), .msg_control = NULL, .msg_controllen = 0, .msg_flags = 0)'
+    msg = 'mk_msg(.msg_name = socket123.socket_peer.socket_address, .msg_name_len = socket123.socket_peer.socket_address_len, .msg_iov = \ref({buf, len}), .msg_control = NotInit, .msg_controllen = 0, .msg_flags = 0)'
     
-    recvmsg_generic(os, current, sockfd, msg, flags)
+    recvmsg_generic(os, current, sockfd, msg, flags, to_sockaddr_ref(NULL), to_nat_ref(NULL))
 end
 
 
@@ -1564,11 +1633,11 @@ params
     count   @IN  : Nat  
     ret     @OUT : Int
 function
-    socket123 = get_sock_data(current, sockfd)
+    get_sock_data(current, sockfd, socket123)
     
 msg = 'mk_msg(.msg_name = socket123.socket_peer.socket_address, .msg_name_len = socket123.socket_peer.socket_address_len, .msg_iov = \ref({buf, len}), .msg_control = 0, .msg_controllen = 0, .msg_flags = 0)'
     
-    sendmsg_generic(os, current, sockfd, msg, \emptyset)
+    recvmsg_generic(os, current, sockfd, msg, \emptyset, to_sockaddr_ref(NULL), to_nat_ref(NULL))
 end
 
 
@@ -1582,11 +1651,12 @@ params
     addrlen @IN  : Nat-ref
     ret     @OUT : Int
 function
-    socket = get_sock_data(current, sockfd)
+    get_sock_data(current, sockfd, socket)
 
     if (\deref(addrlen) > socket.socket_addrlen) {
-        \deref(address) := socket.socket_peer.socket_address
-    } else { // Buffer is too sma   ll
+        \deref(address).sun_family := AF_UNIX
+        \deref(address).sun_path := socket.socket_peer.socket_address
+    } else { // Buffer is too small
         \deref(address) := 0 // Truncate address 
     }
     
@@ -1606,9 +1676,10 @@ params
     addrlen @IN  : Nat-ref
     ret     @OUT : Int
 function
-    socket = get_sock_data(current, sockfd)
+    get_sock_data(current, sockfd, socket)
 
     if (\deref(addrlen) > socket_addrlen) {
+        \deref(address).sun_family := AF_UNIX
         \deref(address) := socket.socket_address
     } else { // Buffer is too small
         \deref(address) := 0 // Truncate address        
@@ -1619,7 +1690,6 @@ function
     return 0
 end
 
-#TODO: Пересмотреть Nat... в fd
 #TODO: Autobind feature
 
 type RequstedAccessType:
