@@ -423,7 +423,6 @@ function
         newFile = 'mk_File(.file_path=sock_address, .file_type=SOCKET_TYPE, .file_cred = { fc_uid, .fc_gid, .fc_permissions = {. S_IRUSR, S_IWUSR, S_IXUSR, S_IRGRP, S_IWGRP, S_IXGRP, S_IROTH, S_IWOTH, S_IXOTH.} \diff current.proc_cred.cr_umask })' // Создание нового файла
         add_to_set(os.os_files, newFile) // Добавление файла в ФС
         openfile.of_file := newFile // сокет связывается с созданным файлом
-        #TODO: user, group, permission... в errors?
     }
     
     socket.socket_address := sock_address
@@ -720,7 +719,7 @@ function
 end
 
 ############## IO part start ###########
-#TODO нормальное завршение. Доьавить артрибут сокеты на состояние tcp соединения, который будет меняться в close. Отразить в recvmsg_generic/sendmsg_generic реакцию на закрытии другой стороны соединения + добавить что если tcp close то переназначить нельзя(?)
+#TODO доработать завршение соединения. Доьавить артрибут сокеты на состояние tcp соединения, который будет меняться в close. Отразить в recvmsg_generic/sendmsg_generic реакцию на закрытии другой стороны соединения + добавить что если tcp close то переназначить нельзя(?)
 
 #TODO
 event getsockopt
