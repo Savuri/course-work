@@ -590,12 +590,6 @@ params
 function
     * Удалить элемент key из map
 end
-    
-
-
-const POSSIBLE_SOCKET_TYPES : SockType-set-set // Множество корректных типов сокета. Тип сокета (SOCK_STREAM, SOCK_DGRAM, SOCK_RDM etc), и (опционально) флаги SOCK_NONBLOCK или SOCK_CLOEXEC. Т.е. либо тройка, либо двойка, либо только тип сокета (SOCK_STREAM etc).
-const MAX_FDS_PER_PROC : Nat // Максимальное число файловых дескрипторов для одного процесса
-const MAX_OPEN_FILES   : Nat // Максимальное число открытых файлов в системе. Это число может быть найдено, например, в файле /proc/sys/fs/file-max
 
 
 const NULL : void*
@@ -612,6 +606,15 @@ params
 invariant domain == AF_UNIX // Модель только для UNIX сокетов
 invariant current \isin os.os_proceses // Текущей процесс существует в рамках системы
 function
+    possible_errors = socket_errors(os, current, domain, sock_type, protocol)
+    
+    if (possible_errors != {. .}) {
+          forany(error : Int | error \isin possible_errors) {
+  	        current.proc_errno := error
+           	return -1
+          }
+    }
+
     forany(newFD : Nat | newFD \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD) => nn \isin \dom(current.proc_fds)) {
     socket = 'mk_socket(.socket_status=UNCONNECTED, .socket_address=Nothing, .socket_addrlen=Nothing, .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=Nothing, .socket_flags={. .}, .socket_type=Nothing, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(), socket_so_sndbuf=DEFAULT_SO_SNDBUF, .socket_used_buffer=0, .socket_cur_buffer_cnt=0)'
         
@@ -871,7 +874,7 @@ function
 end
 
 
-
+#TODO
 event close // close (описывался к применнию только для fd сокета)
 params
     os       @IN  : OS
@@ -996,7 +999,8 @@ function
 
 end
 
-
+############## IO part start ###########
+#TODO нормальное завршение. параметр на состояние tcp соединения, который будет меняться в close. Отразить в recvmsg_generic/sendmsg_generic реакцию на закрытии другой стороны соединения
 
 type Level:
 enum
@@ -1182,6 +1186,8 @@ type msghdr : struct {
 is
 **msghdr** - структура для sendmsg/recvmsg
 endtype
+
+
 
 
 logical max_msg_cnt # Я не знаю как это получить. Оно зависит от SO_SNDBUF текущего сокета => Параметр - сокет-отправитель
