@@ -1,0 +1,334 @@
+module 'Типы'
+
+type Uid : Nat // численный индефикатор пользователя
+type Gid : Nat // численный индефикатор группы
+
+type Gids : Gid-set
+type Uids : Uid-set
+
+
+type Permission:
+enum
+    S_IRUSR                       
+    S_IWUSR                        
+    S_IXUSR                   
+    S_IRGRP
+    S_IWGRP
+    S_IXGRP
+    S_IROTH
+    S_IWOTH
+    S_IXOTH
+endtype
+
+
+type Permissions : Permission-set
+
+
+type Cred : struct
+{
+    Uid cr_uid;            // Real user id
+    Uid cr_euid;           // Effective user id
+    Uid cr_suid;           // saved effective user id.
+    Gid cr_gid;            // Real group id 
+    Gid cr_egid;           // effective group id
+    Gid cr_sgid;           // Saved effective group id
+    Int cr_ngroups;       // number of groups
+    Gids cr_groups;     // groups
+    Permissions cr_umask;    // umask
+}
+is
+**Cred** - структура, хранящая информацию о правах процесса
+endtype
+
+
+
+type Fcred : struct
+{
+    Uid fc_uid;
+    Gid fc_gid;
+    Permissions fc_permission;
+}
+endtype
+
+# Раздел сигналов - Beg
+#type Handler  -- не нужно
+#type Handler3 -- не нужно
+type Sigset : Nat-set
+type SignalFlag: # Мне достаточно описать SA_RESTART
+enum
+    SA_RESTART // Перезапустить определённый системный вызов.
+endtype
+type SignalFlags : SignalFlag-set
+
+type Sigaction : struct
+{
+    #Handler hand; // Обработчик с одним параметром.
+    #Handler3 sigact; // Обработчик с 3мя параметрами.
+    SignalFlags signal_flags; // Флаги сигналов.
+    #Sigset sigset; // contains a bitmask with exactly one bit for each signal available in the system. It is used to block other signals during execution of the handler routine. Мне это не нужно.
+}
+is
+**Sigaction** - структура, описывающая работу с сигналами. 
+endtype
+# Раздел сигналов - End
+
+type ProcStatus:
+enum
+    R // running or runnable (on run queue)
+    S // interruptible sleep (waiting for an event to complete) (В этом состоянии процесc при блокировке)
+is
+**ProcStatus** - перечислимый тип, содержащий статус текущего процесса:
+$enumdefs$
+endtype
+
+type FdFlag: 
+enum
+    FD_CLOEXEC // close on exec
+is
+**FdFlag** - тип для флагов, которые приписаны к файловому дескриптору на уровне конкретного процесса:
+$enumdefs$
+endtype
+
+type FileType:
+enum
+    REGULAR_FILE_TYPE // обычный файл
+    DIRECTORY_TYPE    // директория
+    SYMLINK_TYPE      // символическая ссылка
+    SOCKET_TYPE       // сокет
+is
+**FileType** - перечислимы тип, описывающий типы файлов:
+$enumdefs$
+endtype
+
+type OpenFileFlag :
+enum
+    O_RDONLY  // доступ на чтение
+    O_WRONLY  // доступ на запись
+    O_RDWR    // доступ и на чтение, и на запись
+    O_NONBLOCK  // запрет блокировки
+is
+**OpenFileType** перечисление флагов открытых файлов:
+$enumdefs$
+endtype
+
+type sk_buff : struct 
+{
+    void* buf_data; // буффер в котором передаются данные
+    Nat data_len; // количество байт данных
+    Nat consumed; // количество прочитанных байт данных (Нужно для SOCK_STREAM).
+    void* buf_control_data; // буффер дополнительных данных
+    Nat control_len; // количетсво байт дополнительных данных
+    Text sender; // адрес отправителя
+}
+is
+**sk_buff** - данные внутри каждого буффера. Для *SOCK_DGRAM* и *SOCK_SEQPACKET*, можно сказать, предстваляет получаемую датаграмму. Для *SOCK_STREAM* буфферы будут читаться последовательно, отмечая уже прочитанные данные, учёт которых происходит в *consumed*. При *consumed* == *len* буффер считается полностью прочитанным и удаляется из очереди. 
+endtype
+
+type SocketStatus:
+enum
+    FREE
+    UNCONNECTED
+    CONNECTING
+    CONNECTED
+    DISCONNECTING
+    LISTEN
+is
+**SocketStatus** - перечисление, в которых может находится сокет. 
+endtype
+
+type SocketFlag: 
+enum
+       SO_ACCEPTCONN
+       SO_ATTACH_FILTER //(since Linux 2.2)
+       SO_ATTACH_BPF //(since Linux 3.19)
+       SO_ATTACH_REUSEPORT_CBPF
+       SO_ATTACH_REUSEPORT_EBPF
+       SO_BINDTODEVICE
+       SO_BROADCAST
+       SO_BSDCOMPAT // Уже не поддерживается
+       SO_DEBUG
+       SO_DETACH_FILTER //(since Linux 2.2)
+       SO_DETACH_BPF //(since Linux 3.19)
+       SO_DOMAIN
+       SO_ERROR
+       SO_DONTROUTE
+       SO_INCOMING_CPU //(gettable since Linux 3.19, settable since Linux 4.4)
+       SO_KEEPALIVE
+       SO_LINGER
+       SO_LOCK_FILTER
+       SO_MARK //(since Linux 2.6.25)
+       SO_OOBINLINE
+       SO_PASSCRED
+       SO_PASSSEC 
+       SO_PEEK_OFF //(since Linux 3.4)
+       SO_PEERCRED
+       SO_PRIORITY
+       SO_PROTOCOL //(since Linux 2.6.32)
+       SO_RCVBUF // Does not have effect in unix socket (buf callable?)
+       SO_RCVBUFFORCE //(since Linux 2.6.14)
+       SO_RCVLOWAT
+       SO_SNDLOWAT
+       SO_RCVTIMEO
+       SO_SNDTIMEO
+       SO_REUSEADDR
+       SO_REUSEPORT// (since Linux 3.9)
+       SO_RXQ_OVFL //(since Linux 2.6.33)
+       SO_SNDBUF
+       SO_SNDBUFFORCE// (since Linux 2.6.14)
+       SO_TIMESTAMP
+       SO_TIMESTAMPNS
+       SO_TIMESTAMPING
+       SO_TYPE
+       SO_BUSY_POLL //(since Linux 3.11)
+is
+**SocketFlag** - перечесление флагов сокета.    
+end
+
+type SocketFlags : SocketFlag-set
+
+type SockType: # Чтобы закинуть, к примеру SOCK_NONBLOCK и SOCK_STREAM в один set. Пусть будет один тип.
+enum
+    SOCK_STREAM
+    SOCK_DGRAM
+    SOCK_SEQPACKET
+    SOCK_RAW
+    SOCK_RDM
+    SOCK_PACKET
+    SOCK_NONBLOCK
+    SOCK_CLOEXEC
+is
+**SockType** - перечисление типов сокетов.
+endtype
+
+type ShutdownFlags:
+enum
+    RCV_SHUTDOWN   // Сокет не может читать 
+    SEND_SHUTDOWN  // Сокет не может писать
+endtype
+
+type AddressFamily:
+enum
+    AF_UNIX // == AF_LOCAL
+    AF_UNSPEC
+is 
+**AddressFamily** - перечесление семейств адрессов. В данной модели рассматривается только *AF_UNIX*. 
+ 
+$enumdefs$
+endtype
+
+type Protocol:
+enum
+    PF_UNIX // == PF_LOCAL
+    PF_UNSPEC
+is
+**Protocol** - протоколы:
+
+$enumdefs$
+endtype
+
+type Error: 
+enum
+    EACCES
+    EAFNOSUPPORT
+    EINVAL
+    EMFILE
+    ENFILE
+    ENOBUFS
+    ENOMEM
+    EPROTONOSUPPORT
+    EBADF
+    ENOTSOCK
+    EINVAL
+    EROFS
+    EFAULT
+    ENAMETOOLONG
+    ENOENT
+    ENOMEM
+    ENOTDIR
+    EACCES
+    ELOOP
+    ESOCKTNOSUPPORT
+    EADDRINUSE
+    EADDRNOTAVAIL
+    EOPNOTSUPP
+    EINTR
+    EIO
+    ENOSPC
+    EDQUOT
+is
+**Error** - перечисление всех кодов ошибок, которые могут возникать в событиях.
+endtype
+
+type Sockaddr_un : struct
+{
+    AddressFamily sun_family;
+    Text sun_path;
+}
+is
+**Sockaddr_un** - соотвествующая си структура, которая передаётся, например, в *bind*.
+endtype
+
+type ShutdownParam:
+enum
+    SHUT_RD
+    SHUT_WR
+    SHUT_RDWR
+is
+**ShutdownParam** - перечисление возможных значений параметра *how* в систменов вызове *shutdown*
+endtype
+
+
+type Level:
+enum
+    SOL_SOCKET
+is
+**SOL_SOCKET** - опции для всех сокетов или опции только юниксовых соектов
+end
+
+type MsgFlags:
+enum
+    MSG_CONFIRM
+    MSG_DONTROUTE
+    MSG_DONTWAIT
+    MSG_EOR
+    MSG_TRUNC
+    MSG_CTRUNC
+    MSG_ERRQUEUE
+    MSG_MORE // Unix socket does not support this flag 
+    MSG_NOSIGNAL
+    MSG_OOB // Unix socket does not support this flag
+is
+*MsgFlgas* - тип всех флагов для функций sendto, recvfrom
+endtype
+
+type iovec : struct {
+    void* iov_base;
+    Nat iov_len;
+}
+is
+**iovec** - iovec для msghndr
+endtype
+
+type ioveclist : iovec-list
+
+type msghdr : struct {
+    Text     msg_name;
+    Nat       msg_namelen;
+    ioveclist msg_iov;
+    Nat       msg_iovlen;
+    void*     msg_control;
+    Nat       msg_controllen;
+    Int       msg_flags;
+}
+is
+**msghdr** - структура для sendmsg/recvmsg
+endtype
+
+type RequstedAccessType:
+enum
+    READ
+    WRITE
+    EXEC
+endtype
+
+endmodule

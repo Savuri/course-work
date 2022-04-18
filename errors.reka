@@ -1,0 +1,132 @@
+# 3 перевода строки - разделение между объектами/событиями
+# 1 перевода строки разделение между артрибутами
+module 'Ошибки'
+
+import everything from types
+
+logical tmptmp
+params
+    os @IN : UnbinededType
+function
+    * some-text
+end
+
+#TODO декомпозиция файла не удалась OS, OpenFile и т.д. здесь не определены. Как исправить?
+
+
+const POSSIBLE_SOCKET_TYPES : SockType-set-set // Множество корректных типов сокета {. SOCK_STREAM, SOCK_DGRAM, SOCK_RDM .} >< {. SOCK_NONBLOCK .} >< {. SOCK_CLOEXEC .}. Тип сокета (SOCK_STREAM, SOCK_DGRAM, SOCK_RDM etc), и (опционально) флаги SOCK_NONBLOCK или SOCK_CLOEXEC. Т.е. либо тройка, либо двойка, либо только тип сокета (SOCK_STREAM etc).
+const MAX_FDS_PER_PROC : Nat // Максимальное число файловых дескрипторов для одного процесса
+const MAX_OPEN_FILES   : Nat // Максимальное число открытых файлов в системе. Это число может быть найдено, например, в файле /proc/sys/fs/file-max
+
+logical socket_errors // сокращение для получения множество вохможноых ошибок, при заданных входных данных для системного вызова socket.
+params
+    os        @IN  : OS
+    current   @IN  : Process
+    domain    @IN  : AddressFamily
+    sock_type @IN  : SockType-set // Почему-то SOCK_STREAM | SOCK_DGRAM в AF_UNIX успешно создает SOCK_DGRAM сокет...
+    protocol  @IN  : Protocol
+    errors    @OUT : Error-set
+function
+    # Ошибка                   - соотвествующая проверка\
+    # Socket errors in man page
+    # EACCES                   - Не нашёл, когда ошибка возникает. А сам не понимаю. (есть только пример когда такое на
+    # EAFNOSUPPORT             - domain \isin ADDRESS_FAMILIES
+    # EINVAL
+    # EMFILE
+    # ENFILE 
+    # ENOBUFS or ENOMEM
+    # EPROTONOSUPPORT          - protocol \isin CORRECT_PROTOCOLS
+    #
+    # Errors from man 7 unix (AF_UNIX error codes) (Которые как я понял могут возникать в socket())
+    # ESOCKTNOSUPPORT          - sock_type \isin CORRECT_SOCKET_TYPES
+
+    return {. errcode for errcode : Error | (errcode == EACCES) && False || # EACCES не нашёл где возникает, кроме случая с андроид
+    (errcode == EAFNOSUPPORT) && (domain != AF_UNIX) ||
+    (errcode == EPROTONOSUPPORT) && (protocol != PF_UNIX && protocol != 0) || 
+    (errcode == EINVAL) && (sock_type \notisin POSSIBLE_SOCKET_TYPES) || 
+    (errcode == EMFILE) && (\len(\dom(current.proc_fds)) == MAX_FDS_PER_PROC) ||
+    (errcode == ENFILE) && (\len(os.os_open_file_table) == MAX_OPEN_FILES) ||
+    (errcode == ENOBUFS) && False || # Не знаю как, поэтому не специфицирую
+    (errcode == ENOMEM) && False ||  # Не знаю как, поэтому не специфицирую 
+    (errcode == ESOCKTNOSUPPORT) && (sock_type \intersect {. SOCK_STREAM .} == {. .} || sock_type \intersect {. SOCK_DGRAM .} == {. .} && sock_type \intersect {. SOCK_SEQPACKET .} == {. .}}) .}
+end
+
+
+# Todo в алгоритм(?)
+logical groupmember
+params
+    gid   @IN  : Gid
+    cred  @IN  : Cred
+    ret   @OUT : Bool
+function
+    if (gid == cred.cr_egid) {
+        return True
+    } else {
+        forany(group : Gid | group \isin cred.cr_groups) {
+            if (group == gid) {
+                return True
+            } else {
+                return False
+            }
+        }
+    }
+end
+
+# На самом деле я пока не понимаю как файл типа сокет реагирует на доступ на чтение, запись, исполнение. 
+# Но мне это и не нужно описывать. Достаточно просто описать описать проверку директорий на EXEC и сокета на WRITE в нужном месте.
+logical access
+params
+    os          @IN  : OS
+    current     @IN  : Process
+    access_type @IN  : RequstedAccessType
+    file        @IN  : File
+    ret         @OUT : Bool
+function
+    cred = current.proc_cred
+    fcred = file.file_cred
+    ftype = file.file_type
+    
+    if (cred.cr_euid == 0) {
+        return ((access_type == EXEC) && ftype != DIRECTORY_TYPE && (fcred.fc_permission \intersect {. S_IXUSR, S_IXGRP, S_IXOTH .} != {. .}))
+    } else {       
+        if (cred.cr_euid == fcred.fc_uid) {
+            if (access_type == EXEC) {
+                mask = {. S_IXUSR .}
+            } elif (access_type == READ) {
+                mask = {. S_IRUSR .}
+            } elif (access_type == WRITE) {
+                mask = {. S_IWUSR .}
+            }
+        } elif (groupmember(fcred.fc_gid, cred)) {
+            if (access_type == EXEC) {
+                mask = {. S_IXGRP .}
+            } elif (access_type == READ) {
+                mask = {. S_IRGRP .}
+            } elif (access_type == WRITE) {
+                mask = {. S_IWGRP .}
+            }
+        } else {
+            if (access_type == EXEC) {
+                mask = {. S_IXGRP .}
+            } elif (access_type == READ) {
+                mask = {. S_IRGRP .}
+            } elif (access_type == WRITE) {
+                mask = {. S_IWGRP .}
+            }
+        }
+        
+        return (fcred.fc_permission \intersect mask) == mask
+    }
+end
+
+
+
+logical access_to_write
+params
+    file    @IN  : Text
+    res     @OUT : Bool
+function
+    * Нужно выделять в строке подстроку и проверить x на директориях и w на файле
+end
+endmodule
+

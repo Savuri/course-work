@@ -3,6 +3,10 @@
 module 'Абстрактные модели'
   attr target_object: 'система'
 
+import everything from types
+import logicals from errors 
+
+
 object OS is 
 **OS** - объект, представляющий систему целиком
 end
@@ -33,77 +37,6 @@ end
 endobject
 
 
-type Uid : Nat // численный индефикатор пользователя
-type Gid : Nat // численный индефикатор группы
-
-type Gids : Gid-set
-type Uids : Uid-set
-
-
-type Permission:
-enum
-    S_IRUSR                       
-    S_IWUSR                        
-    S_IXUSR                   
-    S_IRGRP
-    S_IWGRP
-    S_IXGRP
-    S_IROTH
-    S_IWOTH
-    S_IXOTH
-endtype
-
-
-type Permissions : Permission-set
-
-
-type Cred : struct
-{
-    Uid cr_uid;            // Real user id
-    Uid cr_euid;           // Effective user id
-    Uid cr_suid;           // saved effective user id.
-    Gid cr_gid;            // Real group id 
-    Gid cr_egid;           // effective group id
-    Gid cr_sgid;           // Saved effective group id
-    Int cr_ngroups;       // number of groups
-    Gids cr_groups;     // groups
-    Permissions cr_umask;    // umask
-}
-is
-**Cred** - структура, хранящая информацию о правах процесса
-endtype
-
-
-
-type Fcred : struct
-{
-    Uid fc_uid;
-    Gid fc_gid;
-    Permissions fc_permission;
-}
-endtype
-
-# Раздел сигналов - Beg
-#type Handler  -- не нужно
-#type Handler3 -- не нужно
-type Sigset : Nat-set
-type SignalFlag: # Мне достаточно описать SA_RESTART
-enum
-    SA_RESTART // Перезапустить определённый системный вызов.
-endtype
-type SignalFlags : SignalFlag-set
-
-type Sigaction : struct
-{
-    #Handler hand; // Обработчик с одним параметром.
-    #Handler3 sigact; // Обработчик с 3мя параметрами.
-    SignalFlags signal_flags; // Флаги сигналов.
-    #Sigset sigset; // contains a bitmask with exactly one bit for each signal available in the system. It is used to block other signals during execution of the handler routine. Мне это не нужно.
-}
-is
-**Sigaction** - структура, описывающая работу с сигналами. 
-endtype
-# Раздел сигналов - End
 
 object Process is
 **Process** - отдельный процесс ОС.
@@ -137,15 +70,6 @@ objattr proc_blocked_signals : Sigset is # Nat есть здесь, если с�
 **proc_blocked_signals** - в этом множестве находятся номера сигналов, которые блокируются.
 end
 
-type ProcStatus:
-enum
-    R // running or runnable (on run queue)
-    S // interruptible sleep (waiting for an event to complete) (В этом состоянии процесc при блокировке)
-is
-**ProcStatus** - перечислимый тип, содержащий статус текущего процесса:
-$enumdefs$
-endtype
-
 objattr proc_status : ProcStatus is 
 **proc_status** - текущее состояние процесса
 end
@@ -161,35 +85,18 @@ objattr fd_open_file_ref : OpenFile-ref is
 **fd_open_file_ref** - ссылка на структуру с информацией об открытом файле.
 end
 
-type FdFlag: 
-enum
-    FD_CLOEXEC // close on exec
-is
-**FdFlag** - тип для флагов, которые приписаны к файловому дескриптору на уровне конкретного процесса:
-$enumdefs$
-endtype
-
 objattr fd_flags : FdFlag-set is # Хотя возможен только один
 **fd_flags** - флаги, которые приписаны к файловому дескриптору на уровне конкретного процесса.
 end
 endobject
 
-object File
+object File is
+**File** - объект, представляющий файл в ФС
+end
 
 objattr file_path : Text is
 **file_path** - абсолютный путь до файла.
 end
-
-type FileType:
-enum
-    REGULAR_FILE_TYPE // обычный файл
-    DIRECTORY_TYPE    // директория
-    SYMLINK_TYPE      // символическая ссылка
-    SOCKET_TYPE       // сокет
-is
-**FileType** - перечислимы тип, описывающий типы файлов:
-$enumdefs$
-endtype
 
 objattr file_type : FileType is
 **file_type** - тип файла.
@@ -206,7 +113,6 @@ object OpenFile is
 **OpenFile** хранит информацию об открытом файле. Например, такие данные, как флаги доступа, оступ в файле и т.д..
 end
 
-
 # Бывший of_op_type - операции определённые для этого типа. Этим хотелось выразить наличия поля op в стркутуре откртытого файла, с целью различения типов открытых файлов. Здесь он просто равен типу файлу.
 objattr of_type : FileType is
 **of_type** - тип открытого файла. # Дублирует тип File. Дублирование необходимо т.к. файла для сокета в ФС ещё может не быть, но подсмотреть тип файла для описание ошибочных ситуаций нужно.  
@@ -220,25 +126,9 @@ objattr of_ref_cnt : Int is
 **of_ref_cnt** - число ссылающихся на эту запись файловых дескрипторов.
 end
 
-type OpenFileFlag :
-enum
-    O_RDONLY  // доступ на чтение
-    O_WRONLY  // доступ на запись
-    O_RDWR    // доступ и на чтение, и на запись
-    O_NONBLOCK  // запрет блокировки
-is
-**OpenFileType** перечисление флагов открытых файлов:
-$enumdefs$
-endtype
-
 objattr of_flags : OpenFileFlag-set is # Как-то не точно описано, но усложнять не хочется. (не точность в возможности присутствия одновременно O_RDONLY, и O_WRONLY, и O_RDWR, хотя в реальности возможно наличие только одного из них)  
 **of_flags** - флаги открытого файла. 
 end
-
-
-#objattr of_indent : Int is #Мне это не нужно. Удалю позже
-#**of_indent** - отступ в открытом файле, с которым работают все read/write.
-#end
 
 objattr of_private_data : Socket-ref is
 **of_private_data** - ссылка на важные структура данных. (Здесь находится ссылка на структуру сокет).
@@ -247,39 +137,9 @@ endobject
 
 
 
-const Nothing // Константа для неинициализированных частей
-
-
-type sk_buff : struct 
-{
-    void* buf_data; // буффер в котором передаются данные
-    Nat data_len; // количество байт данных
-    Nat consumed; // количество прочитанных байт данных (Нужно для SOCK_STREAM).
-    void* buf_control_data; // буффер дополнительных данных
-    Nat control_len; // количетсво байт дополнительных данных
-    Text sender; // адрес отправителя
-}
-is
-**sk_buff** - данные внутри каждого буффера. Для *SOCK_DGRAM* и *SOCK_SEQPACKET*, можно сказать, предстваляет получаемую датаграмму. Для *SOCK_STREAM* буфферы будут читаться последовательно, отмечая уже прочитанные данные, учёт которых происходит в *consumed*. При *consumed* == *len* буффер считается полностью прочитанным и удаляется из очереди. 
-endtype
-
-
-
 object Socket is 
 **Socket** - объект представляющий собой UNIX сокет.
 end
-
-type SocketStatus:
-enum
-    FREE
-    UNCONNECTED
-    CONNECTING
-    CONNECTED
-    DISCONNECTING
-    LISTEN
-is
-**SocketStatus** - перечисление, в которых может находится сокет. 
-endtype
 
 objattr socket_status : SocketStatus is
 **socket_status** - текущий статус сокета
@@ -305,81 +165,13 @@ objattr socket_peer : Socket-ref is
 **socket_peer** - ссылка на сокета-друга, с котором б общение.
 end
 
-type SocketFlag: 
-enum
-       SO_ACCEPTCONN
-       SO_ATTACH_FILTER //(since Linux 2.2)
-       SO_ATTACH_BPF //(since Linux 3.19)
-       SO_ATTACH_REUSEPORT_CBPF
-       SO_ATTACH_REUSEPORT_EBPF
-       SO_BINDTODEVICE
-       SO_BROADCAST
-       SO_BSDCOMPAT // Уже не поддерживается
-       SO_DEBUG
-       SO_DETACH_FILTER //(since Linux 2.2)
-       SO_DETACH_BPF //(since Linux 3.19)
-       SO_DOMAIN
-       SO_ERROR
-       SO_DONTROUTE
-       SO_INCOMING_CPU //(gettable since Linux 3.19, settable since Linux 4.4)
-       SO_KEEPALIVE
-       SO_LINGER
-       SO_LOCK_FILTER
-       SO_MARK //(since Linux 2.6.25)
-       SO_OOBINLINE
-       SO_PASSCRED
-       SO_PASSSEC 
-       SO_PEEK_OFF //(since Linux 3.4)
-       SO_PEERCRED
-       SO_PRIORITY
-       SO_PROTOCOL //(since Linux 2.6.32)
-       SO_RCVBUF // Does not have effect in unix socket (buf callable?)
-       SO_RCVBUFFORCE //(since Linux 2.6.14)
-       SO_RCVLOWAT
-       SO_SNDLOWAT
-       SO_RCVTIMEO
-       SO_SNDTIMEO
-       SO_REUSEADDR
-       SO_REUSEPORT// (since Linux 3.9)
-       SO_RXQ_OVFL //(since Linux 2.6.33)
-       SO_SNDBUF
-       SO_SNDBUFFORCE// (since Linux 2.6.14)
-       SO_TIMESTAMP
-       SO_TIMESTAMPNS
-       SO_TIMESTAMPING
-       SO_TYPE
-       SO_BUSY_POLL //(since Linux 3.11)
-is
-**SocketFlag** - перечесление флагов сокета.    
-end
-
-type SocketFlags : SocketFlag-set
-
 objattr socket_flags : SocketFlags is
 **socket_flags** - флаги сокета. Осуществлять управление этими флагами можно с помощью *setsockopt* и  *getsockopt*
 end
 
-type SockType: # Чтобы закинуть, к примеру SOCK_NONBLOCK и SOCK_STREAM в один set. Пусть будет один тип.
-enum
-    SOCK_STREAM
-    SOCK_DGRAM
-    SOCK_SEQPACKET
-    SOCK_RAW # SOCK_RAW == SOCK_DGRAM для unix сокетов (Буквально). В документации SOCK_RAW вообще не описан, но в коде при создании SOCK_RAW сокета, тип меняется на SOCK_DGRAM.
-    SOCK_NONBLOCK
-    SOCK_CLOEXEC
-is
-**SockType** - перечисление типов сокетов.
-endtype
-
 objattr socket_type : SockType is
 **socket_type** - тип сокета.
 end
-
-type ShutdownFlags:
-enum
-    RCV_SHUTDOWN   // Сокет не может читать 
-    SEND_SHUTDOWN  // Сокет не может писать
-endtype
 
 objattr socket_shutdown_flags : ShutdownFlags-set is
 **socket_shutdown_flags** - флаги, обозначающие закрытие на операции чтения и записи, выполняемые этим сокетом. 
@@ -400,61 +192,8 @@ end
 objattr socket_cur_buffer_cnt : Nat is
 **socket_cur_buffer_cnt** - количество уже выделенных буфферов.
 end
-
-type AddressFamily:
-enum
-    AF_UNIX // == AF_LOCAL
-    AF_UNSPEC
-is 
-**AddressFamily** - перечесление семейств адрессов. В данной модели рассматривается только *AF_UNIX*. 
- 
-$enumdefs$
-endtype
-
-type Protocol:
-enum
-    PF_UNIX // == PF_LOCAL
-    PF_UNSPEC
-is
-**Protocol** - протоколы:
-
-$enumdefs$
-endtype
 endobject
 
-
-type Error: 
-enum
-    EACCES
-    EAFNOSUPPORT
-    EINVAL
-    EMFILE
-    ENFILE
-    ENOBUFS
-    ENOMEM
-    EPROTONOSUPPORT
-    EBADF
-    ENOTSOCK
-    EINVAL
-    EROFS
-    EFAULT
-    ENAMETOOLONG
-    ENOENT
-    ENOMEM
-    ENOTDIR
-    EACCES
-    ELOOP
-    ESOCKTNOSUPPORT
-    EADDRINUSE
-    EADDRNOTAVAIL
-    EOPNOTSUPP
-    EINTR
-    EIO
-    ENOSPC
-    EDQUOT
-is
-**Error** - перечисление всех кодов ошибок, которые могут возникать в событиях.
-endtype
 
 
 const DEFAULT_SO_SNDBUF : Nat // Значение в /proc/sys/net/core/wmem_default
@@ -593,7 +332,7 @@ end
 
 
 const NULL : void*
-const NotInit
+const Nothing // Константа для неинициализированных частей
 
 event socket // socket
 params
@@ -618,7 +357,7 @@ function
     forany(newFD : Nat | newFD \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD) => nn \isin \dom(current.proc_fds)) {
     socket = 'mk_socket(.socket_status=UNCONNECTED, .socket_address=Nothing, .socket_addrlen=Nothing, .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=Nothing, .socket_flags={. .}, .socket_type=Nothing, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(), socket_so_sndbuf=DEFAULT_SO_SNDBUF, .socket_used_buffer=0, .socket_cur_buffer_cnt=0)'
         
-        if (SOCK_DGRAM \isin sock_type || SOCK_RAW \isin sock_type) {
+        if (SOCK_DGRAM \isin sock_type) {
             socket.socket_type := SOCK_DGRAM
         } elif (SOCK_STREAM \isin sock_type) {
             socket.socket_type := SOCK_STREAM
@@ -626,7 +365,7 @@ function
            socket.socket_type := SOCK_SEQPACKET
         }
         
-        openfile = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=NotInit, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket)'    
+        openfile = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Nothing, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket)'    
             
         if (SOCK_NONBLOCK \isin sock_type) {
             add_to_set(openfile.of_flags, O_NONBLOCK)
@@ -644,17 +383,6 @@ function
         return newFD
     }
 end
-
-
-
-type Sockaddr_un : struct
-{
-    AddressFamily sun_family;
-    Text sun_path;
-}
-is
-**Sockaddr_un** - соотвествующая си структура, которая передаётся, например, в *bind*.
-endtype
 
 
 
@@ -704,6 +432,8 @@ function
     
     return 0
 end
+
+
 
 const SOMAXCONN : Nat // значение в /proc/sys/net/core/somaxconn файле
 
@@ -853,7 +583,7 @@ function
                         \deref(addrlen) := \len(newUnixAddress)      
                     }
 
-                    openfile = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=NotInit, .of_ref_cnt=1, of_flags={. O_RDWR .}, .of_private_data=socket)'    
+                    openfile = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Nothing, .of_ref_cnt=1, of_flags={. O_RDWR .}, .of_private_data=socket)'    
                     newFDObject = 'mk_Fd(.fd_open_file_ref=\ref(openfile), .fd_flags={. .})'
 
                     add_to_map(current.proc_fds, newFD, newFDObject)
@@ -897,16 +627,6 @@ function
     
     return 0
 end
-
-
-type ShutdownParam:
-enum
-    SHUT_RD
-    SHUT_WR
-    SHUT_RDWR
-is
-**ShutdownParam** - перечисление возможных значений параметра *how* в систменов вызове *shutdown*
-endtype
 
 
 
@@ -954,7 +674,7 @@ function
                     socket1.socket_peer := socket2
                     socket2.socket_peer := socket1
                     
-                    if (SOCK_DGRAM \isin sock_type || SOCK_RAW \isin sock_type) {
+                    if (SOCK_DGRAM \isin sock_type) {
                         socket1.socket_type := SOCK_DGRAM
                         socket2.socket_type := SOCK_DGRAM
                     } elif (SOCK_STREAM \isin sock_type) {
@@ -965,8 +685,8 @@ function
                         socket2.socket_type := SOCK_SEQPACKET
                     }
                     
-                    openfile1 = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=NotInit, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket1)'
-                    openfile2 = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=NotInit, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket2)'    
+                    openfile1 = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Nothing, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket1)'
+                    openfile2 = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Nothing, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket2)'    
                         
                     if (SOCK_NONBLOCK \isin sock_type) {
                         add_to_set(openfile1.of_flags, O_NONBLOCK)
@@ -1000,15 +720,7 @@ function
 end
 
 ############## IO part start ###########
-#TODO нормальное завршение. параметр на состояние tcp соединения, который будет меняться в close. Отразить в recvmsg_generic/sendmsg_generic реакцию на закрытии другой стороны соединения
-
-type Level:
-enum
-    SOL_SOCKET
-is
-**SOL_SOCKET** - опции для всех сокетов или опции только юниксовых соектов
-end
-
+#TODO нормальное завршение. Доьавить артрибут сокеты на состояние tcp соединения, который будет меняться в close. Отразить в recvmsg_generic/sendmsg_generic реакцию на закрытии другой стороны соединения + добавить что если tcp close то переназначить нельзя(?)
 
 #TODO
 event getsockopt
@@ -1132,24 +844,6 @@ end
 
 
 
-type MsgFlags:
-enum
-    MSG_CONFIRM
-    MSG_DONTROUTE
-    MSG_DONTWAIT
-    MSG_EOR
-    MSG_TRUNC
-    MSG_CTRUNC
-    MSG_ERRQUEUE
-    MSG_MORE // Unix socket does not support this flag 
-    MSG_NOSIGNAL
-    MSG_OOB // Unix socket does not support this flag
-is
-*MsgFlgas* - тип всех флагов для функций sendto, recvfrom
-endtype
-
-
-
 logical interrupt_logical
 params
     pre_state  @IN  : Universe
@@ -1159,34 +853,6 @@ params
     res        @OUT : Bool
 end
     attr event-desc: Прерывание ожидания процесса, из-за прихода сигнала, который не блокируется маской (current.proc_pending_signals != <..> && exists x:Nat | (x \isin current.proc_pending_signals) && (x \notisin curren.proc_blocked_signals)). Если для пришедшего сигнала верно SA_RESTART \isin current.proc_sigaction_array(signum).signal_flags && SO_RCVTIMEO \notisin socket.socket_flags это эквиваленто перезапуску системного вызова т.е. в этом случае res == False, иначе res == True. 
-
-
-
-type iovec : struct {
-    void* iov_base;
-    Nat iov_len;
-}
-is
-**iovec** - iovec для msghndr
-endtype
-
-type ioveclist : iovec-list
-
-
-
-type msghdr : struct {
-    Text     msg_name;
-    Nat       msg_namelen;
-    ioveclist msg_iov;
-    Nat       msg_iovlen;
-    void*     msg_control;
-    Nat       msg_controllen;
-    Int       msg_flags;
-}
-is
-**msghdr** - структура для sendmsg/recvmsg
-endtype
-
 
 
 
@@ -1623,7 +1289,7 @@ params
 function
     get_sock_data(current, sockfd, socket123)
     
-    msg = 'mk_msg(.msg_name = socket123.socket_peer.socket_address, .msg_name_len = socket123.socket_peer.socket_address_len, .msg_iov = \ref({buf, len}), .msg_control = NotInit, .msg_controllen = 0, .msg_flags = 0)'
+    msg = 'mk_msg(.msg_name = socket123.socket_peer.socket_address, .msg_name_len = socket123.socket_peer.socket_address_len, .msg_iov = \ref({buf, len}), .msg_control = Nothing, .msg_controllen = 0, .msg_flags = 0)'
     
     recvmsg_generic(os, current, sockfd, msg, flags, to_sockaddr_ref(NULL), to_nat_ref(NULL))
 end
@@ -1697,92 +1363,6 @@ function
 end
 
 #TODO: Autobind feature
-
-type RequstedAccessType:
-enum
-    READ
-    WRITE
-    EXEC
-endtype
-
-
-
-logical groupmember
-params
-    gid   @IN  : Gid
-    cred  @IN  : Cred
-    ret   @OUT : Bool
-function
-    if (gid == cred.cr_egid) {
-        return True
-    } else {
-        forany(group : Gid | group \isin cred.cr_groups) {
-            if (group == gid) {
-                return True
-            } else {
-                return False
-            }
-        }
-    }
-end
-
-# На самом деле я пока не понимаю как файл типа сокет реагирует на доступ на чтение, запись, исполнение. 
-# Но мне это и не нужно описывать. Достаточно просто описать описать проверку директорий на EXEC и сокета на WRITE в нужном месте.
-logical access
-params
-    os          @IN  : OS
-    current     @IN  : Process
-    access_type @IN  : RequstedAccessType
-    file        @IN  : File
-    ret         @OUT : Bool
-function
-    cred = current.proc_cred
-    fcred = file.file_cred
-    ftype = file.file_type
-    
-    if (cred.cr_euid == 0) {
-        return ((access_type == EXEC) && ftype != DIRECTORY_TYPE && (fcred.fc_permission \intersect {. S_IXUSR, S_IXGRP, S_IXOTH .} != {. .}))
-    } else {       
-        if (cred.cr_euid == fcred.fc_uid) {
-            if (access_type == EXEC) {
-                mask = {. S_IXUSR .}
-            } elif (access_type == READ) {
-                mask = {. S_IRUSR .}
-            } elif (access_type == WRITE) {
-                mask = {. S_IWUSR .}
-            }
-        } elif (groupmember(fcred.fc_gid, cred)) {
-            if (access_type == EXEC) {
-                mask = {. S_IXGRP .}
-            } elif (access_type == READ) {
-                mask = {. S_IRGRP .}
-            } elif (access_type == WRITE) {
-                mask = {. S_IWGRP .}
-            }
-        } else {
-            if (access_type == EXEC) {
-                mask = {. S_IXGRP .}
-            } elif (access_type == READ) {
-                mask = {. S_IRGRP .}
-            } elif (access_type == WRITE) {
-                mask = {. S_IWGRP .}
-            }
-        }
-        
-        return (fcred.fc_permission \intersect mask) == mask
-    }
-end
-
-
-
-logical access_to_write
-params
-    file    @IN  : Text
-    res     @OUT : Bool
-function
-    * Нужно выделять в строке подстроку и проверить x на директориях и w на файле
-end
-
 
 note 'OBJTREE_NOTE' is
 @objtree[root:OS]@
