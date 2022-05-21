@@ -558,7 +558,7 @@ end
 
 
 
-logical to_nat_ref
+logical to_nat_pointer
 params
     prm1 @IN  : void*
     ret  @OUT : Nat*
@@ -708,7 +708,7 @@ function
         
         if (SOCK_STREAM \isin sock_type) {
             socket.socket_type := SOCK_STREAM
-        } else if (SOCK_SEQPACKET \isin sock_type) {
+        } elif (SOCK_SEQPACKET \isin sock_type) {
            socket.socket_type := SOCK_SEQPACKET
         } else { # SOCK_RAW, SOCK_DGRAM
            socket.socket_type := SOCK_DGRAM
@@ -964,13 +964,13 @@ function
     }
 
     socket = get_sock_data(current, sockfd)
-    socket.status := LISTENING
+    socket.socket_status := LISTENING
     current.proc_status := S
     
     wait INFWAIT { 
         trigger (backlog_is_not_empty(socket)) { // текст для триггера 1. Есть кого принимать
             current.proc_status := R
-            socket.status := LISTEN
+            socket.socket_status := LISTEN
             peer = get_list_head(socket.socket_queue) // Тот, кто подсоединяется
             forany(newFD : Nat | newFD \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD) => nn \isin \dom(current.proc_fds)) { // Создаются fd, OpenFile, Socket. Причём все поля у новых OpenFile и Socket такие же, как и у этих же объектов соотвестующих sockfd. 
                 forany(newUnixAddress : Text | newUnixAddress \notisin \dom(os.os_socket_table) && newUnixAddress(0) == '\0') {
@@ -999,7 +999,7 @@ function
         trigger (interrupt_logical(current, socket)) { // текст для триггера 2
             current.proc_errno := EINTR
             current.proc_status := R
-            socket.status := LISTEN
+            socket.socket_status := LISTEN
             
             return -1   
         }
@@ -1083,7 +1083,7 @@ params
     current   @IN  : Process
     domain    @IN  : AddressFamily
     sock_type @IN  : SockType-set
-    protocol  @IN  : Protocol-set
+    protocol  @IN  : Protocol
     fds       @IN  : Nat -m-> Nat
     fd        @OUT : Int
 function
@@ -1418,9 +1418,6 @@ end
 #"Output" socket interfaces, when a timeout (SO_RCVTIMEO) has
 #been set on the socket using setsockopt(2): connect(2),
 #send(2), sendto(2), and sendmsg(2).
-
-
-
 event sendmsg
 params
     os       @IN  : OS
@@ -1640,11 +1637,12 @@ end
 
 action recvmsg_generic
 params
-    os       @IN  : OS
-    current  @IN  : Process
-    sockfd   @IN  : Nat
-    msg      @IN  : msghdr-ref
-    flags    @IN  : MsgFlags-set
+    os          @IN  : OS
+    current     @IN  : Process
+    sockfd      @IN  : Nat
+    msg         @IN  : msghdr-ref
+    flags       @IN  : MsgFlags-set
+    paddrlen @IN  : Nat*
 function
     socket = get_sock_data(current, sockfd)
     
@@ -1652,12 +1650,15 @@ function
     wait INFWAIT {
         trigger (msg_have_come(socket)) { // Описание триггера 1
             current.proc_status := R
-            res = get_data(os, socket, msg)
             
-            #if (msg->msg_namelen != 0) { // Это всё в recvfrom TODO
-            #    msg->msg_namelen := msg.msg_name
-            #    addrlen     := msg.msg_namelen
-            #}
+            if (msg->msg_name == 'NULL' && paddrlen == to_nat_pointer(NULL)) {
+                res = get_data(os, socket, msg)
+                # msg_namelen ссылкается на поданный буффер, так что заполняя его, сразу заполняем ответ. 
+                \deref(paddrlen) := msg.msg_namelen # с длинной адресса не так
+            } else {
+                res = get_data(os, socket, msg)
+            }
+        
             
             return res
         }
@@ -1672,6 +1673,8 @@ end
 
 
 
+
+
 event recvmsg //recvmsg
 params
     os       @IN  : OS
@@ -1681,7 +1684,7 @@ params
     flags    @IN  : MsgFlags-set
     ret      @OUT : Int
 function
-    recvmsg_generic(os, current, sockfd, msg, flags)
+    recvmsg_generic(os, current, sockfd, msg, flags, \ref(msg->msg_namelen))
 end
 
 
@@ -1699,7 +1702,7 @@ params
 function
     msg = 'mk_msg(.msg_name = src->address, .msg_name_len = \deref(addrlen), .msg_iov = \ref({buf, len}), .msg_control = 0, .msg_controllen = 0, .msg_flags = 0)'
     
-    recvmsg_generic(os, current, sockfd, msg, flags) #TODOTODO Прямиком скопировать всё из recv_msg_gengeric. Потому что как инчае сделать присваивания в addrlen черезе generic нормально с текущей структурой reka - загадка
+    recvmsg_generic(os, current, sockfd, msg, flags, addrlen)
 end
 
 
@@ -1717,7 +1720,7 @@ function
     
     msg = 'mk_msg(.msg_name = socket123.socket_peer.socket_address, .msg_name_len = socket123.socket_peer.socket_address_len, .msg_iov = \ref({buf, len}), .msg_control = Nothing, .msg_controllen = 0, .msg_flags = 0)'
     
-    recvmsg_generic(os, current, sockfd, msg, flags)
+    recvmsg_generic(os, current, sockfd, msg, flags, to_nat_pointer(NULL))
 end
 
 
@@ -1735,7 +1738,7 @@ function
     
     msg = 'mk_msg(.msg_name = socket123.socket_peer.socket_address, .msg_name_len = socket123.socket_peer.socket_address_len, .msg_iov = \ref({buf, len}), .msg_control = 0, .msg_controllen = 0, .msg_flags = 0)'
     
-    recvmsg_generic(os, current, sockfd, msg, \emptyset)
+    recvmsg_generic(os, current, sockfd, msg, \emptyset, to_nat_pointer(NULL))
 end
 
 
@@ -1922,13 +1925,12 @@ function
     socket = get_sock_data(current, sockfd)
     openfile = get_open_file(current, sockfd)
     
-    
     return {. errcode for errcode : Error | (errcode == EACCES) && (socket.socket_address(0) != '\0' && access_to_write(os, socket.socket_address)) || 
         (errcode == EPERM) && (False) || 
         (errcode == EADDRINUSE) && (socket.socket_address \isin \dom(os.os_socket_table)) || 
         (errcode == EADDRNOTAVAIL) && (False) || 
         (errcode == EAFNOSUPPORT) && (sockaddr.sun_family != AF_UNIX) ||
-        (errcode == EAGAIN) && (O_NONBLOCK \isin openfile.openfile_flags && is_free_space_in_backlog(server)) || 
+        (errcode == EAGAIN) && (O_NONBLOCK \isin openfile.of_flags && \len(server.socket_queue) < server.socket_backlog) || 
         (errcode == EALREADY) && (False) || 
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
         (errcode == ECONNREFUSED) && (server.socket_status != LISTEN) || 
@@ -1960,7 +1962,7 @@ function
     socket = get_sock_data(current, sockfd)
     openfile = get_open_file(current, sockfd)
     
-    return {. errcode for errcode : Error | (errcode == EAGAIN) && (\not backlog_is_not_empty(socket)) || 
+    return {. errcode for errcode : Error | (errcode == EAGAIN) && (O_NONBLOCK \isin openfile.of_flags && socket.socket_queue == <..>) || 
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
         (errcode == ECONNABORTED) && (False) || 
         (errcode == EFAULT) && (False) ||
@@ -1971,8 +1973,7 @@ function
         (errcode == ENOMEM) && (False) || 
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) || 
         (errcode == EOPNOTSUPP) && (socket.socket_type != SOCK_STREAM && socket.socket_type != SOCK_SEQPACKET) || 
-        (errcode == EPROTO) && (False)
-        q.}
+        (errcode == EPROTO) && (False) .}
 
 end
 
@@ -1987,7 +1988,7 @@ function
     #socket = get_sock_data(current, sockfd)
     #openfile = get_open_file(current, sockfd)
     
-    return {. errcode for errcode : Error | (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
+    return {. errcode for errcode : Error | (errcode == EBADF) && (fd \notisin \dom(current.proc_fds)) || 
         (errcode == EINTR) && (False) || 
         (errcode == EIO) && (False) || 
         (errcode == ENOSPC) && (False) || 
@@ -2004,8 +2005,8 @@ params
     how      @IN  : ShutdownParam
     ret      @OUT : Error-set
 function
-    #socket = get_sock_data(current, sockfd)
-    #openfile = get_open_file(current, sqockfd)
+    socket = get_sock_data(current, sockfd)
+    openfile = get_open_file(current, sockfd)
     
     return {. errcode for errcode : Error | (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
         (errcode == EINVAL) && (how != SHUT_RD && how != SHUT_WR && how != SHUT_RDWR) || 
@@ -2021,19 +2022,16 @@ params
     current   @IN  : Process
     domain    @IN  : AddressFamily
     sock_type @IN  : SockType-set
-    protocol  @IN  : Protocol-set
+    protocol  @IN  : Protocol
     fds       @IN  : Nat -m-> Nat
     ret      @OUT : Error-set
-function
-    socket = get_sock_data(current, sockfd)
-    openfile = get_open_file(current, sockfd)
-    
+function    
     return {. errcode for errcode : Error | (errcode == EAFNOSUPPORT) && (domain != AF_UNIX) || 
         (errcode == EFAULT) && (False) || 
         (errcode == EMFILE) && (set_len(\dom(current.proc_fds)) == MAX_FDS_PER_PROC - 1) ||
         (errcode == ENFILE) && (set_len(os.os_open_file_table) == MAX_OPEN_FILES - 1) ||
         (errcode == EOPNOTSUPP) && (protocol != PF_UNIX && protocol != PF_UNSPEC) || 
-        (errcode == EPROTONOSUPPORT) && (protocol != PF_UNIX && protocol !+ PF_UNSPEC) .}
+        (errcode == EPROTONOSUPPORT) && (protocol != PF_UNIX && protocol != PF_UNSPEC) .}
 end
 
 
@@ -2068,8 +2066,7 @@ params
     addrlen  @IN  : Nat*
     ret      @OUT : Error-set
 function
-    #socket = get_sock_data(current, sockfd)
-    #openfile = get_open_file(current, sockfd)
+    openfile = get_open_file(current, sockfd)
     
     return {. errcode for errcode : Error | (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
         (errcode == EFAULT) && (False) || 
