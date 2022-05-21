@@ -1316,7 +1316,6 @@ end
 
 
 
-#TODO: убрать memcpy
 event load_data
 params
     msg     @IN  : msghdr
