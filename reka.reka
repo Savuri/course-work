@@ -635,14 +635,15 @@ end
 
 
 # Для сокращения
-logical get_by_address
+event get_by_address
 params
     os        @IN  : OS
     sock_addr @IN  : Text
     sock      @OUT : Socket
 function 
     return os.os_socket_table(sock_addr)
-end 
+end
+    attr algorithm: 'Алгоритм, выдающий структуру сокета по адрессу'
 
 
 
@@ -1328,14 +1329,14 @@ function
     
     for (i in [0..msg.msg_iovlen]) {
         // Данные просматриваются последовательно и загружаются подряд
-        * memcpy(buf.buf_data + buf.data_len, msg.msg_iov(i).iovbase, msg.msg_iov(i).iov_len) # Описываю будто адрессная арифметика с void* работает 1 байт
+        memcpy(buf.buf_data + buf.data_len, msg.msg_iov(i).iovbase, msg.msg_iov(i).iov_len) // Описываю будто адрессная арифметика с void* работает 1 байт
         // Устанавливается общий размер данных (поле data_len)
         buf.data_len := buf.data_len + msg.msg_iov(i).iov_len
     }
     
     if (msg.msg_controllen != 0) {
         //Если есть дополнительные данные, они загружаются
-        * memcpy(buf.buf_control_data, msg.msg_control, msg.msg_controllen) 
+        memcpy(buf.buf_control_data, msg.msg_control, msg.msg_controllen) 
         // Устанавливается размер дополнительных данных  
         buf.control_len := msg.msg_controllen
     } else {
@@ -1346,7 +1347,6 @@ function
     }
     
     add_to_list(reciver.socket_buf, buf)
-
 end
     attr algorithm: 'Алгоритм загрузки данных'
 
@@ -1360,7 +1360,7 @@ params
     reciver    @IN  : Socket
     res        @OUT : Bool
 end
-    attr event-desc: Ждём освобождение места в буффера отправителя. (sender.socket_cur_buffer_cnt < max_msg_cnt(sender) || get_msg_len(msg) < socket.socket_so_sndbuf / 2 - socket.socket_used_buffer)
+    attr event-desc: Ждём освобождение места в буффера отправителя. (sender.socket_cur_buffer_cnt < max_msg_cnt(sender) && get_msg_len(msg) < socket.socket_so_sndbuf * 2 - socket.socket_used_buffer)
 
 
 
@@ -1374,7 +1374,11 @@ params
     ret      @OUT : Int
 function
     socket = get_sock_data(current, sockfd)
-    other = get_by_address(os, msg->msg_name)
+    if (socket.socket_type == SOCK_DGRAM) {
+        other = get_by_address(os, msg->msg_name)
+    } else {
+        other = socket.socket_peer
+    }
 
     current.proc_status := S
     wait INFWAIT {
@@ -1384,8 +1388,8 @@ function
         }
             
         trigger (interrupt_logical(current, socket)) { // сообщение для триггера 2
-            current.proc_errno := EINTR
             current.proc_status := R
+            current.proc_errno := EINTR
             return -1   
         }
     }
@@ -1427,7 +1431,6 @@ params
     flags    @IN  : MsgFlags-set
     ret      @OUT : Int
 function
-    # sendmsg TODO если получатель не указан установить получаетля peer'ом
     sendmsg_generic(os, current, sockfd, msg, flags)
 end
 
@@ -1503,6 +1506,19 @@ end
     attr algorithm: 'Алгоритм получения минимального среди двух Int.'
 
 
+event memcpy
+params
+    T    @TYPE
+    dest @IN   : T*
+    src  @IN   : T*
+    n    @IN   : Nat
+function
+    * Скопировать n байт из адреса src в адрес dest.
+end
+    attr algorithm: 'Алгоритм реализующий функцию memcpy из библиотеки СИ, но без возвращаемого результата'
+
+
+
 #TODO доделать (get_by_address в алгоритме не работает) + memcpy
 event get_data
 params
@@ -1524,17 +1540,16 @@ function
         # Возвращает число считанных данных
         # в msg.msg_name загружается адрес отправителя (если изначального буффера не хватает, msg_name зануляется и устанавливается кореектный размер в msg.msg_namelen
         # в msg.msg_namelen длина адреса отправителя
-
         
         buf = reciver.socket_buf(0) // Первая пришедшая датаграмма
-        'sender = get_by_address(os, buf.sender)' // Отправитель
+        sender = get_by_address(os, buf.sender) // Отправитель
 
         while ('i < msg->msg_iovlen && buf.consumed < buf.data_len') { #TODO while с двумя условиями
             iov := msg->msg_iov(i)
-            cur_dgram_copied = min(iov.iov_len,  buf.data_len - buf.consumed)
+            cur_dgram_copied = min(iov.iov_len, buf.data_len - buf.consumed)
             
-            * copied := copied + memcpy(iov.iov_base, buf.buf_data + buf.consumed, cur_dgram_copied)
-            
+            memcpy(iov.iov_base, buf.buf_data + buf.consumed, cur_dgram_copied)
+            copied := copied + cur_dgram_copied
             buf.consumed := buf.consumed + cur_dgram_copied
             
             if (cur_dgram_copied == iov.iov_len) {
@@ -1544,7 +1559,7 @@ function
         
         if (buf.control_len != 0) {
             //Если есть дополнительные данные, они загружаются
-            * memcpy(\ref(msg->msg_control), \ref(buf.buf_control_data), min(msg.msg_controllen, buf.control_len))
+            memcpy(msg->msg_control, \ref(buf.buf_control_data), min(msg.msg_controllen, buf.control_len))
             // Устанавливается размер дополнительных данных  
             msg->msg_controllen := min(msg->msg_controllen, buf.control_len)
         } else {
@@ -1554,8 +1569,8 @@ function
             msg->msg_controllen := 0
         }
         
-        'sender.socket_used_buffer := sender.socket_used_buffer - buf.data_len' // Освобождается память в буффере отправителя для последующих сообщений.
-        'sender.socket_cur_buffer_cnt--'
+        sender.socket_used_buffer := sender.socket_used_buffer - buf.data_len // Освобождается память в буффере отправителя для последующих сообщений.
+        sender.socket_cur_buffer_cnt--
         del_from_list(reciver.socket_buf, 0) // Прочитанная датаграмма удаляется.
         
         return copied
@@ -1574,7 +1589,6 @@ function
         while ('i < msg->msg_iovlen && socket.socket_buf != <. .>') {
             buf = reciver.socket_buf(0)
             
-            
             def cur_stream_copied : Nat := 0
             # copy one socket buff
             while ('i < msg->msg_iovlen && buf.consumed < buf.data_len') {
@@ -1583,9 +1597,8 @@ function
                 bytes_to_copy = min(iov.iov_len - cur_iov_base_size, buf.data_len - buf.consumed)
                 
                 cur_stream_copied := cur_stream_copied + bytes_to_copy
-                
-                # Предполагаю, что адресная арифметика для void* (т.е. iov.iov_base) байтова (void *) + 1 - сдвиг адреса на единицу
-                * cur_iov_base_size := cur_iov_base_size + memcpy(iov.iov_base + cur_iov_base_size, buf.buf_data + buf.consumed, bytes_to_copy)
+                cur_iov_base_size := cur_iov_base_size + bytes_to_copy
+                memcpy(iov.iov_base + cur_iov_base_size, buf.buf_data + buf.consumed, bytes_to_copy) // Предполагаю, что адресная арифметика для void* (т.е. iov.iov_base) байтова (void *) + 1 - сдвиг адреса на единицу
                 buf.consumed := buf.consumed + bytes_to_copy
             
                 if (cur_iov_base_size == iov.iov_len) {
@@ -1595,25 +1608,24 @@ function
             }
             
             copied := copied + cur_stream_copied
-            cur_stream_copied := 0
             
             if (buf.buf_control_data != NULL) { // Если есть дополнительные данные
                 // Копируются дополнительный данные
-                * memcpy(\ref(msg->msg_control), \ref(buf.buf_control_data), min(msg.msg_controllen, buf.control_len))
-                msg.msg_controllen := buf.control_len
+                memcpy(\ref(msg->msg_control), \ref(buf.buf_control_data), min(msg.msg_controllen, buf.control_len))
+                msg.msg_controllen := min(msg.msg_controllen, buf.control_len)
                 
                 // Освобождаются ресурсы
-                'get_by_address(os, buf.sender, other)'
-                'other.socket_used_buffer := other.socket_used_buffer - buf.data_len'
-                'other.socket_cur_buffer_cnt--'
+                other = get_by_address(os, buf.sender)
+                other.socket_used_buffer := other.socket_used_buffer - buf.data_len
+                other.socket_cur_buffer_cnt--
                 del_from_list(socket_buf, 0)
                 
                 //Заверешение иттерации
                 return copied  
             } elif (buf.consumed == buf.data_len) {
-                'get_by_address(os, buf.sender, other)'
-                'other.socket_used_buffer := other.socket_used_buffer - buf.data_len'
-                'other.socket_cur_buffer_cnt--'
+                other = get_by_address(os, buf.sender)
+                other.socket_used_buffer := other.socket_used_buffer - buf.data_len
+                other.socket_cur_buffer_cnt--
                 del_from_list(socket_buf, 0)
             }
         }
