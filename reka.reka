@@ -275,6 +275,11 @@ enum
     EAGAIN
     ECONNABORTED
     EPROTO
+    ECONNRESET
+    EPIPE
+    ESRCH
+    EDESTADDRREQ
+    EMSGSIZE
 is
 **Error** - перечисление всех кодов ошибок, которые могут возникать в событиях.
 endtype
@@ -305,7 +310,7 @@ is
 **SOL_SOCKET** - опции для всех сокетов или опции только юниксовых соектов
 end
 
-type MsgFlags:
+type MsgFlag:
 enum
     MSG_CONFIRM
     MSG_DONTROUTE
@@ -313,13 +318,15 @@ enum
     MSG_EOR
     MSG_TRUNC
     MSG_CTRUNC
-    MSG_ERRQUEUE
+    MSG_ERRQUEUE // Похоже не имеет смысла для Unix сокетов
     MSG_MORE // Unix socket does not support this flag 
     MSG_NOSIGNAL
     MSG_OOB // Unix socket does not support this flag
 is
 *MsgFlgas* - тип всех флагов для функций sendto, recvfrom
 endtype
+
+type MsgFlags : MsgFlag-set
 
 type iovec : struct {
     void* iov_base;
@@ -338,7 +345,7 @@ type msghdr : struct {
     Nat       msg_iovlen;
     void*     msg_control;
     Nat       msg_controllen;
-    Int       msg_flags;
+    MsgFlags  msg_flags;
 }
 is
 **msghdr** - структура для sendmsg/recvmsg
@@ -391,7 +398,7 @@ object Process is
 end
 
 objattr proc_pid : Int is
-**proc_pid** - уникальный индефикатор процесса.
+**proc_pid** - уникальный идентификатор процесса.
 end
 
 objattr proc_errno : Int is
@@ -406,16 +413,18 @@ objattr proc_cred : Cred is
 **proc_cred** - информация о правах процесса.
 end
 
-objattr proc_sigaction_array : Nat -m-> Sigaction is # sighand_struct === k_sigaction[_NSIG] === proc_sigaction_array
-**proc_sigaction_array** - информация об обработчиках процесса. Отображение номера сигнала в # (обработку сигналов не прикручивал)
+objattr proc_sigaction_array : Nat -m-> Sigaction is
+**proc_sigaction_array** - информация об обработчиках сигналов процесса.
+Отображение номера сигнала в стрктуру с информацией об обрабатывании этого
+сигнала.
 end
 
-objattr proc_pending_signals : Nat-list is # Это более расширеная структура с информацией о том от кого пришло и т.д. т.е. с полем 'siginfo_t info';
+objattr proc_pending_signals : Nat-list is
 **proc_pending_signals** - номера сигналов, пришедших на обработку. 
 end
 
-objattr proc_blocked_signals : Sigset is # Nat есть здесь, если сигнал блокируется. В реальности это битовая маска, но я пока сигналы их номером описываю.
-**proc_blocked_signals** - в этом множестве находятся номера сигналов, которые блокируются.
+objattr proc_blocked_signals : Sigset is
+**proc_blocked_signals** - в этом множестве находятся номера заблокированных для обработки сигналов.
 end
 
 objattr proc_status : ProcStatus is 
@@ -478,7 +487,7 @@ objattr of_flags : OpenFileFlag-set is # Как-то не точно описа�
 **of_flags** - флаги открытого файла. 
 end
 
-objattr of_private_data : Socket-ref is
+objattr of_private_data : Socket* is
 **of_private_data** - ссылка на важные структура данных. (Здесь находится ссылка на структуру сокет).
 end
 endobject
@@ -491,6 +500,10 @@ end
 
 objattr socket_status : SocketStatus is
 **socket_status** - текущий статус сокета
+end
+
+objattr socket_name : Text is
+**socket_name** - значение в поле структуры sockaddr_un
 end
 
 objattr socket_address : Text is
@@ -510,7 +523,7 @@ objattr socket_backlog : Int is
 end
 
 objattr socket_peer : Socket-ref is
-**socket_peer** - ссылка на сокета-друга, с котором б общение.
+**socket_peer** - ссылка на сокета-друга, с котором происходит общение.
 end
 
 objattr socket_flags : SocketFlags is
@@ -630,7 +643,9 @@ params
     sockfd  @IN  : Nat
     sock    @OUT : Socket
 function
-    return current.proc_fds(sockfd).fd_open_file_ref->of_private_data
+    #res = \deref(current.proc_fds(sockfd).fd_open_file_ref->of_private_data)
+    #return res
+    return \deref(current.proc_fds(sockfd).fd_open_file_ref->of_private_data)
 end
 
 
@@ -769,7 +784,7 @@ params
     addrlen  @IN  : Nat
     ret      @OUT : Int
 function    
-    possible_errors = bind_errors(os, current, sockfd, sockaddr, addrlen)
+    possible_errors = bind_errors(os, current, sockfd, sockaddr, addrlen)    
     
     sock_address = make_path_abs(current, sockaddr->sun_path)
     
@@ -783,26 +798,29 @@ function
     socket = get_sock_data(current, sockfd)
     openfile = get_open_file(current, sockfd)
     
+    socket.socket_address := sockaddr->sun_path
     
-    if (addrlen == 'sizeof(sa_family_t)') { // Autobind feature -- Linux feature
+    if (addrlen == 'sizeof(sa_family_t)') { # Autobind feature -- Linux feature
         forany(newUnixAddress : Text | newUnixAddress \notisin \dom(os.os_socket_table) && \len(newUnixAddress) == 6 && newUnixAddress(0) == '\0' && newUnixAddress(1) \isin AutoBindAlphabet && newUnixAddress(2) \isin AutoBindAlphabet && newUnixAddress(3) \isin AutoBindAlphabet && newUnixAddress(4) \isin AutoBindAlphabet && newUnixAddress(5) \isin AutoBindAlphabet) {
             socket.socket_address := sock_address
             socket.socket_addrlen := 6 # One byte \0 + 5 of autobind address The change to 5 bytes came in Linux 2.3.15.)
-            add_to_map(os.os_socket_table, sock_address, socket) // зафиксировать созданный сокет в системе и его адрес, для последующего нахождения. В Linux это реализует с помощью хэшей
+            add_to_map(os.os_socket_table, sock_address, socket) # зафиксировать созданный сокет в системе и его адрес, для последующего нахождения. В Linux это реализует с помощью хэшей
+            
+            return 0
         }
+    } else {
+        if (sock_address(0) != '\0') { # Обычный сокет. Абстрактному сокету это не нужно.
+            newFile = 'mk_File(.file_path=sock_address, .file_type=SOCKET_TYPE, .file_cred = { fc_uid, .fc_gid, .fc_permissions = {. S_IRUSR, S_IWUSR, S_IXUSR, S_IRGRP, S_IWGRP, S_IXGRP, S_IROTH, S_IWOTH, S_IXOTH.} \diff current.proc_cred.cr_umask })' // Создание нового файла
+            add_to_set(os.os_files, newFile) // Добавление файла в ФС
+            openfile.of_file := newFile // сокет связывается с созданным файлом
+        }
+        
+        socket.socket_name := sockaddr->sun_path
+        socket.socket_addrlen := addrlen
+        add_to_map(os.os_socket_table, sock_address, socket) // зафиксировать созданный сокет в системе и его адрес, для последующего нахождения. В Linux это реализует с помощью хэшей
+        
+        return 0
     }
-
-    if (sock_address(0) != '\0') { # Обычный сокет. Абстрактному сокету это не нужно.
-        newFile = 'mk_File(.file_path=sock_address, .file_type=SOCKET_TYPE, .file_cred = { fc_uid, .fc_gid, .fc_permissions = {. S_IRUSR, S_IWUSR, S_IXUSR, S_IRGRP, S_IWGRP, S_IXGRP, S_IROTH, S_IWOTH, S_IXOTH.} \diff current.proc_cred.cr_umask })' // Создание нового файла
-        add_to_set(os.os_files, newFile) // Добавление файла в ФС
-        openfile.of_file := newFile // сокет связывается с созданным файлом
-    }
-    
-    socket.socket_address := sock_address
-    socket.socket_addrlen := addrlen
-    add_to_map(os.os_socket_table, sock_address, socket) // зафиксировать созданный сокет в системе и его адрес, для последующего нахождения. В Linux это реализует с помощью хэшей
-    
-    return 0
 end
 
 
@@ -942,6 +960,77 @@ params
 end
     attr event-desc: Появился запрос на подключение (server.socket_queue != <..>)
 
+
+event accept4 // accept4
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    sockaddr @IN  : Sockaddr_un-ref
+    addrlen  @IN  : Nat*
+    flags    @IN  : SockType-set
+    ret      @OUT : Int
+function
+    possible_errors = accept4_errors(os, current, sockfd, sockaddr, addrlen, flags)
+    
+    if (possible_errors != {. .}) {
+          forany(error : Int | error \isin possible_errors) {
+  	        current.proc_errno := error
+           	return -1
+          }
+    }
+
+    socket = get_sock_data(current, sockfd)
+    socket.socket_status := LISTENING
+    current.proc_status := S
+    
+    wait INFWAIT { 
+        trigger (backlog_is_not_empty(socket)) { // текст для триггера 1. Есть кого принимать
+            current.proc_status := R
+            socket.socket_status := LISTEN
+            peer = get_list_head(socket.socket_queue) // Тот, кто подсоединяется
+            forany(newFD : Nat | newFD \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD) => nn \isin \dom(current.proc_fds)) { // Создаются fd, OpenFile, Socket. Причём все поля у новых OpenFile и Socket такие же, как и у этих же объектов соотвестующих sockfd. 
+                forany(newUnixAddress : Text | newUnixAddress \notisin \dom(os.os_socket_table) && newUnixAddress(0) == '\0') {
+                    new_socket = 'mk_socket(.socket_status=CONNECTED, .socket_address=newUnixAddress, .socket_addrlen=\len(newUnixAddress), .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=peer, .socket_flags={. .}, .socket_type=socket.socket_type, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(),  socket_so_sndbuf=socket.socket_so_sndbuf, .socket_used_buffer=0, .socket_cur_buffer_cnt=0)'
+                
+                
+                    peer.socket_peer := new_socket
+                    peer.socket_status := CONNECTED
+                    
+                    if (sockaddr != to_sockaddr_ref(NULL)) { //sockaddr != NULL
+                        * strncmp(\ref(\deref(sockaddr).sun_path), \ref(newUnixAddress), min(\len(newUnixAddress, \deref(addrlen)))
+                        \deref(addrlen) := \len(newUnixAddress)      
+                    }
+
+                    openfile = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Nothing, .of_ref_cnt=1, of_flags={. O_RDWR .}, .of_private_data=socket)'    
+                    newFDObject = 'mk_Fd(.fd_open_file_ref=\ref(openfile), .fd_flags={. .})'
+                    
+                    if (SOCK_NONBLOCK \isin flags) {
+                        add_to_set(openfile.of_flags, O_NONBLOCK)
+                    }
+                    
+                    if (SOCK_CLOEXEC \isin flags) {
+                        add_to_set(newFDObject.fd_flags, FD_CLOEXEC)
+                    }
+
+                    add_to_map(current.proc_fds, newFD, newFDObject)
+                    add_to_set(os.os_open_file_table, openfile)
+                    add_to_map(os.os_socket_table, new_socket.socket_address, new_socket)
+                
+                    return newFD   
+                }
+            } 
+        }
+            
+        trigger (interrupt_logical(current, socket)) { // текст для триггера 2
+            current.proc_errno := EINTR
+            current.proc_status := R
+            socket.socket_status := LISTEN
+            
+            return -1   
+        }
+    }
+end
 
 
 
@@ -1301,7 +1390,7 @@ end
 
 event get_msg_len
 params
-    msg @IN  : msghdr
+    msg @IN  : msghdr*
     res @OUT : Nat
 function
     def _res : Nat := 0
@@ -1318,7 +1407,7 @@ end
 
 event load_data
 params
-    msg     @IN  : msghdr
+    msg     @IN  : msghdr*
     sender  @IN  : Socket
     reciver @IN  : Socket
 function
@@ -1328,7 +1417,7 @@ function
     
     for (i in [0..msg.msg_iovlen]) {
         // Данные просматриваются последовательно и загружаются подряд
-        memcpy(buf.buf_data + buf.data_len, msg.msg_iov(i).iovbase, msg.msg_iov(i).iov_len) // Описываю будто адрессная арифметика с void* работает 1 байт
+        memcpy(buf.buf_data + buf.data_len, msg.msg_iov(i).iov_base, msg.msg_iov(i).iov_len) // Описываю будто адрессная арифметика с void* работает 1 байт
         // Устанавливается общий размер данных (поле data_len)
         buf.data_len := buf.data_len + msg.msg_iov(i).iov_len
     }
@@ -1359,7 +1448,7 @@ params
     reciver    @IN  : Socket
     res        @OUT : Bool
 end
-    attr event-desc: Ждём освобождение места в буффера отправителя. (sender.socket_cur_buffer_cnt < max_msg_cnt(sender) && get_msg_len(msg) < socket.socket_so_sndbuf * 2 - socket.socket_used_buffer)
+    attr event-desc: Ждём освобождение места в буффера отправителя. (sender.socket_cur_buffer_cnt < max_msg_cnt(sender) && get_msg_len(msg) <= socket.socket_so_sndbuf * 2 - socket.socket_used_buffer)
 
 
 
@@ -1368,8 +1457,8 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    msg      @IN  : msghdr-ref
-    flags    @IN  : MsgFlags-set
+    msg      @IN  : msghdr*
+    flags    @IN  : MsgFlags
     ret      @OUT : Int
 function
     socket = get_sock_data(current, sockfd)
@@ -1426,8 +1515,8 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    msg      @IN  : msghdr-ref
-    flags    @IN  : MsgFlags-set
+    msg      @IN  : msghdr*
+    flags    @IN  : MsgFlags
     ret      @OUT : Int
 function
     sendmsg_generic(os, current, sockfd, msg, flags)
@@ -1440,7 +1529,7 @@ params
     sockfd   @IN  : Nat
     buf      @IN  : void*
     len      @IN  : Nat
-    flags    @IN  : MsgFlags-set
+    flags    @IN  : MsgFlags
     dst      @IN  : Sockaddr_un-ref
     addrlen  @IN  : Nat
     ret      @OUT : Int    
@@ -1461,7 +1550,7 @@ params
     sockfd   @IN  : Nat
     buf      @IN  : void*
     len      @IN  : Nat
-    flags    @IN  : MsgFlags-set
+    flags    @IN  : MsgFlags
     ret      @OUT : Int
 function
     socket123 = get_sock_data(current, sockfd) # Там потом имя с socket из sendmsg_generic накладывается
@@ -1558,7 +1647,7 @@ function
         
         if (buf.control_len != 0) {
             //Если есть дополнительные данные, они загружаются
-            memcpy(msg->msg_control, \ref(buf.buf_control_data), min(msg.msg_controllen, buf.control_len))
+            memcpy(msg->msg_control, buf.buf_control_data, min(msg.msg_controllen, buf.control_len))
             // Устанавливается размер дополнительных данных  
             msg->msg_controllen := min(msg->msg_controllen, buf.control_len)
         } else {
@@ -1610,7 +1699,7 @@ function
             
             if (buf.buf_control_data != NULL) { // Если есть дополнительные данные
                 // Копируются дополнительный данные
-                memcpy(\ref(msg->msg_control), \ref(buf.buf_control_data), min(msg.msg_controllen, buf.control_len))
+                memcpy(msg->msg_control, buf.buf_control_data, min(msg.msg_controllen, buf.control_len))
                 msg.msg_controllen := min(msg.msg_controllen, buf.control_len)
                 
                 // Освобождаются ресурсы
@@ -1652,9 +1741,11 @@ params
     current     @IN  : Process
     sockfd      @IN  : Nat
     msg         @IN  : msghdr-ref
-    flags       @IN  : MsgFlags-set
-    paddrlen @IN  : Nat*
+    flags       @IN  : MsgFlags
+    paddrlen    @IN  : Nat*
 function
+
+
     socket = get_sock_data(current, sockfd)
     
     current.proc_status := S
@@ -1692,9 +1783,18 @@ params
     current  @IN  : Process
     sockfd   @IN  : Nat
     msg      @IN  : msghdr-ref
-    flags    @IN  : MsgFlags-set
+    flags    @IN  : MsgFlags
     ret      @OUT : Int
 function
+    possible_errors = recvmsg_errors(os, current, sockfd, msg, flags)
+    
+    if (possible_errors != {. .}) {
+          forany(error : Int | error \isin possible_errors) {
+  	        current.proc_errno := error
+           	return -1
+          }
+    }
+
     recvmsg_generic(os, current, sockfd, msg, flags, \ref(msg->msg_namelen))
 end
 
@@ -1788,7 +1888,7 @@ function
 
     if (\deref(addrlen) > socket.socket_addrlen) {
         address->sun_family := AF_UNIX
-        address->sun_path := socket.socket_peer.socket_address
+        address->sun_path := socket.socket_peer.socket_name
     } else { // Buffer is too small
         truncate_address(address)        // Truncate address
     }
@@ -1822,7 +1922,7 @@ function
 
     if (\deref(addrlen) > socket_addrlen) {
         address->sun_family := AF_UNIX
-        address->sun_path := socket.socket_address
+        address->sun_path := socket.socket_name
     } else { // Buffer is too small
         truncate_address(address) 
     }
@@ -1890,7 +1990,7 @@ function
     return {. errcode for errcode : Error | (errcode == EACCES) && (abs_path(0) != '\0' && access_to_write(os, abs_path)) ||
         (errcode == EADDRINUSE) && (abs_path \isin \dom(os.os_socket_table)) || 
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
-        (errcode == EINVAL) && (socket.socket_addrlen != 0 || addrlen != 'sizeof(struct sockaddr_un)') || 
+        (errcode == EINVAL) && (socket.socket_addrlen != 0 || (addrlen != 'sizeof(struct sockaddr_un)' && addrlen != 'sizeof(sa_family_t)')) || 
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) || 
         (errcode == EADDRNOTAVAIL) && (False) || 
         (errcode == EFAULT) && (False) || #EFAULT addr points outside the user's accessible address space.
@@ -1936,7 +2036,7 @@ function
     socket = get_sock_data(current, sockfd)
     openfile = get_open_file(current, sockfd)
     
-    return {. errcode for errcode : Error | (errcode == EACCES) && (socket.socket_address(0) != '\0' && access_to_write(os, socket.socket_address)) || 
+    return {. errcode for errcode : Error | (errcode == EACCES) && (socket.socket_address(0) != "\0" && access_to_write(os, socket.socket_address)) || 
         (errcode == EPERM) && (False) || 
         (errcode == EADDRINUSE) && (socket.socket_address \isin \dom(os.os_socket_table)) || 
         (errcode == EADDRNOTAVAIL) && (False) || 
@@ -1969,7 +2069,6 @@ function
 #If address is not a null pointer, the address of the peer for the accepted connection shall be stored in the sockaddr structure pointed to by address, and the length of #this address shall be stored in the object pointed to by address_len.
 
 #If the actual length of the address is greater than the length of the supplied sockaddr structure, the stored address shall be truncated.
-
     socket = get_sock_data(current, sockfd)
     openfile = get_open_file(current, sockfd)
     
@@ -1985,7 +2084,38 @@ function
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) || 
         (errcode == EOPNOTSUPP) && (socket.socket_type != SOCK_STREAM && socket.socket_type != SOCK_SEQPACKET) || 
         (errcode == EPROTO) && (False) .}
+end
 
+
+
+logical accept4_errors
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    sockaddr @IN  : Sockaddr_un-ref
+    addrlen  @IN  : Nat*
+    flags    @IN  : SockType-set
+    ret      @OUT : Error-set    
+function
+#If address is not a null pointer, the address of the peer for the accepted connection shall be stored in the sockaddr structure pointed to by address, and the length of #this address shall be stored in the object pointed to by address_len.
+
+#If the actual length of the address is greater than the length of the supplied sockaddr structure, the stored address shall be truncated.
+    socket = get_sock_data(current, sockfd)
+    openfile = get_open_file(current, sockfd)
+    
+    return {. errcode for errcode : Error | (errcode == EAGAIN) && (O_NONBLOCK \isin openfile.of_flags && socket.socket_queue == <..>) || 
+        (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
+        (errcode == ECONNABORTED) && (False) || 
+        (errcode == EFAULT) && (False) ||
+        (errcode == EINVAL) && (\deref(addrlen) != 'sizeof(struct sockaddr_un)' || socket.socket_status != LISTEN) || 
+        (errcode == EMFILE) && (set_len(\dom(current.proc_fds)) == MAX_FDS_PER_PROC) ||
+        (errcode == ENFILE) && (set_len(os.os_open_file_table) == MAX_OPEN_FILES) ||
+        (errcode == ENOBUFS) && (False) || 
+        (errcode == ENOMEM) && (False) || 
+        (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) || 
+        (errcode == EOPNOTSUPP) && (socket.socket_type != SOCK_STREAM && socket.socket_type != SOCK_SEQPACKET) || 
+        (errcode == EPROTO) && (False) .}
 end
 
 
@@ -2088,6 +2218,92 @@ end
 
 
 
+logical recvmsg_errors
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    msg      @IN  : msghdr-ref
+    flags    @IN  : MsgFlags
+    ret      @OUT : Error-set
+function
+    socket = get_sock_data(current, sockfd)
+    openfile = get_open_file(current, sockfd)
+    
+    if (msg->msg_namelen == 0) {
+        other = socket.socket_peer   
+    } else {
+        other_path = make_path_abs(current, msg->msg_name)
+        other = get_by_address(os, other_path)
+    }
+
+    
+    # ENOTSOCK last in recvmsg
+    # нужно проверить что после wait всё открыто всё доступно
+    return {. errcode for errcode : Error | (errcode == EAGAIN) && (O_NONBLOCK \isin openfile.of_flags && socket.socket_buf == <. .>) || 
+        (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
+        (errcode == ECONNREFUSED) && (socket.socket_addrlen == 0) || # сокет не был проинициализирован 
+        (errcode == EFAULT) && (False) || 
+        (errcode == EINVAL) && (False) || 
+        (errcode == ENOMEM) && (False) || 
+        (errcode == ENOTCONN) && ((socket.socket_type == SOCK_STREAM || socket.socket_type == SOCK_SEQPACKET) && socket.socket_status != CONNECTED) || 
+        (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) || 
+        (errcode == ECONNRESET) && ('Remote socket was unexpectedly closed.') || # в состояние wait
+        (errcode == ENOENT) && ('Одной из директорий в пути для данного адреса не существует') ||
+        (errcode == ENOTCONN) && (msg->msg_namelen == 0 && socket.socket_status != CONNECTED) ||
+        (errcode == EPERM) && ('The sender passed invalid credentials in the struct ucred.') ||
+        (errcode == EPIPE) && ('Remote socket was closed on a stream socket.  If enabled, a SIGPIPE is sent as well.   This  can  be  avoided  by  passing  the MSG_NOSIGNAL flag to send(2) or sendmsg(2).') || 
+        (errcode == EPROTOTYPE) && (socket.socket_type != other.socket_type) || 
+        (errcode == ESRCH) && ('While  sending  an  ancillary  message  containing   credentials (SCM_CREDENTIALS),  the  caller  specified  a  PID that does not match any existing process.') .}
+end
+
+
+
+logical sendmsg_errors
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    msg      @IN  : msghdr*
+    flags    @IN  : MsgFlags
+    ret      @OUT : Error-set
+function
+    socket = get_sock_data(current, sockfd)
+    openfile = get_open_file(current, sockfd)
+    other_path = make_path_abs(current, msg->msg_name)
+    
+    if (msg->msg_namelen == 0) {
+        other = socket.socket_peer   
+    } else {
+        other = get_by_address(os, other_path)
+    }
+
+    # EPIPE - последний в sendmsg
+    return {. errcode for errcode : Error | (errcode == EACCES) && (access_to_write(os, other_path)) || 
+        (errcode == EAGAIN) && (O_NONBLOCK \isin openfile.of_flags && (socket.socket_cur_buffer_cnt == max_msg_cnt(socket) || get_msg_len(msg) > socket.socket_so_sndbuf * 2 - socket.socket_used_buffer)) || 
+        (errcode == EALREADY) && (False) || # for internet socket only 
+        (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
+        (errcode == ECONNRESET) && ('If you set SIGPIPE to be ignored you get the error instead of the signal. https://stackoverflow.com/questions/33053507/econnreset-in-send-linux-c') || 
+        (errcode == EDESTADDRREQ) && ((msg->msg_namelen == 0 && socket.socket_status == CONNECTED) || (msg.msg_namelen != 0 && other_path \notisin \dom(os.os_socket_table))) || 
+        (errcode == EFAULT) && (False) ||  
+        (errcode == EINVAL) && (False) ||  
+        (errcode == EISCONN) && (msg.msg_namelen != 0 && socket.socket_type == SOCK_STREAM && socket.socket_status == CONNECTED) ||  
+        (errcode == EMSGSIZE) && ('cmsg stuf' || get_msg_len(msg) > socket.socket_so_sndbuf) ||  
+        (errcode == ENOBUFS) && (False) ||  
+        (errcode == ENOMEM) && (False) ||  
+        (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) ||  
+        (errcode == EOPNOTSUPP) && ('Some bit in the flags argument is inappropriate for the socket type.') ||
+        (errcode == EPIPE) && ('Remote socket was closed on a stream socket.  If enabled, a SIGPIPE is sent as well.   This  can  be  avoided  by  passing  the MSG_NOSIGNAL flag to send(2) or sendmsg(2).') || 
+        (errcode == ECONNRESET) && ('Remote socket was unexpectedly closed.') || # в состояние wait
+        (errcode == ENOENT) && ('Одной из директорий в пути для данного адреса не существует') ||
+        (errcode == ENOTCONN) && (msg.msg_namelen == 0 && socket.socket_status != CONNECTED) ||
+        (errcode == EPERM) && ('The sender passed invalid credentials in the struct ucred.') ||
+        (errcode == EPROTOTYPE) && (socket.socket_type != other.socket_type) ||
+        (errcode == ESRCH) && ('While  sending  an  ancillary  message  containing   credentials (SCM_CREDENTIALS),  the  caller  specified  a  PID that does not match any existing process.') .} 
+end
+
+
+
 logical get_files_in_path
 params
     os   @IN  : OS
@@ -2095,7 +2311,7 @@ params
     res  @OUT : File-list
 function
     * Возвращает список файлов в заданном пути, в соотвествие с длинной пути т.е. res(0) - корень, res(1) = /home, res(2) = /home/username и т.д., последним элементом является сам файл.
-end 
+end
 
 
 
