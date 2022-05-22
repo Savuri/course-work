@@ -430,6 +430,10 @@ end
 objattr proc_status : ProcStatus is 
 **proc_status** - текущее состояние процесса
 end
+
+objattr proc_cur_path : Text is
+**proc_cur_path** - текущая рабочая директория процесса
+end
 endobject
 
 
@@ -755,7 +759,7 @@ const PATH_MAX : Nat // Maximum path size in system
 
 
 # TODO описать алгоритм. Как я понимаю по итогу это нужно будет описывать с помощью алгоритма.
-logical make_path_abs // если сокет абстрактный, то возвращаем путь. Если путь абсолютный, то избавляемся от ., .., символьных ссылок в пути. Если путь относительный, добавляем слева current_cur_path и избавляемся от ., .., символьных ссылок в пути.
+event make_path_abs # если сокет абстрактный, то возвращаем путь. Если путь абсолютный, то избавляемся от ., .., символьных ссылок в пути. Если путь относительный, добавляем слева current_cur_path и избавляемся от ., .., символьных ссылок в пути.
 params
     current @IN  : Process
     path    @IN  : Text
@@ -765,10 +769,10 @@ function
         return path
     }
     
-    * Если путь абсолютный, то избавляемся от ., .., символьных ссылок в пути. Если путь относительный, добавляем слева current_cur_path и избавляемся от ., .., символьных ссылок в пути.
+    * Если путь абсолютный, то избавляемся от ., .., символьных ссылок в пути. Если путь относительный, добавляем слева current_cur_path и избавляемся от ., .., символьных ссылок в пути (man path_resolution)
 end
+    attr algorithm: 'Алгоритм приведения пути в абсолютный'
 
-#The abstract socket namespace is a nonportable Linux extension.
 
 
 const AutoBindAlphabet : Char-set // character set [0-9a-f]
@@ -1610,7 +1614,6 @@ end
 
 
 
-#TODO доделать (get_by_address в алгоритме не работает) + memcpy
 event get_data
 params
     os      @IN  : OS
@@ -1988,18 +1991,18 @@ function
     
     abs_path = make_path_abs(current, sockaddr->sun_path)
     
-    return {. errcode for errcode : Error | (errcode == EACCES) && (abs_path(0) != '\0' && !access_to_write(os, current, abs_path)) ||
+    return {. errcode for errcode : Error | (errcode == EACCES) && (abs_path(0) != "\0" && !access_to_write(os, current, abs_path)) ||
         (errcode == EADDRINUSE) && (abs_path \isin \dom(os.os_socket_table)) || 
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
         (errcode == EINVAL) && (socket.socket_addrlen != 0 || (addrlen != 'sizeof(struct sockaddr_un)' && addrlen != 'sizeof(sa_family_t)')) || 
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) || 
         (errcode == EADDRNOTAVAIL) && (False) || 
-        (errcode == EFAULT) && (False) || #EFAULT addr points outside the user's accessible address space.
+        (errcode == EFAULT) && (False) ||
         (errcode == ELOOP) && (False) || # Todo
         (errcode == ENAMETOOLONG) && (addrlen >= PATH_MAX) || 
-        (errcode == ENOENT) && ('Одной из директорий в пути для данного адреса не существует') || 
+        (errcode == ENOENT) && (\len(get_files_in_path(os, abs_path)) == 0) || #Одной из директорий в пути для данного адреса не существует
         (errcode == ENOMEM) && (False) || 
-        (errcode == ENOTDIR) && ('В пути встречена не директория') || 
+        (errcode == ENOTDIR) && (!is_all_files_in_path_dirs(os, current, abs_path)) || 
         (errcode == EROFS) && (False) .}
 end
 
@@ -2126,10 +2129,7 @@ params
     current  @IN  : Process
     fd       @IN  : Nat
     ret      @OUT : Error-set
-function
-    #socket = get_sock_data(current, sockfd)
-    #openfile = get_open_file(current, sockfd)
-    
+function    
     return {. errcode for errcode : Error | (errcode == EBADF) && (fd \notisin \dom(current.proc_fds)) || 
         (errcode == EINTR) && (False) || 
         (errcode == EIO) && (False) || 
@@ -2230,11 +2230,11 @@ params
 function
     socket = get_sock_data(current, sockfd)
     openfile = get_open_file(current, sockfd)
+    other_path = make_path_abs(current, msg->msg_name)
     
     if (msg->msg_namelen == 0) {
         other = socket.socket_peer   
     } else {
-        other_path = make_path_abs(current, msg->msg_name)
         other = get_by_address(os, other_path)
     }
 
@@ -2250,7 +2250,7 @@ function
         (errcode == ENOTCONN) && ((socket.socket_type == SOCK_STREAM || socket.socket_type == SOCK_SEQPACKET) && socket.socket_status != CONNECTED) || 
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) || 
         (errcode == ECONNRESET) && ('Remote socket was unexpectedly closed.') || # в состояние wait
-        (errcode == ENOENT) && ('Одной из директорий в пути для данного адреса не существует') ||
+        (errcode == ENOENT) && (\len(get_files_in_path(os, other_path)) == 0) ||
         (errcode == ENOTCONN) && (msg->msg_namelen == 0 && socket.socket_status != CONNECTED) ||
         (errcode == EPERM) && ('The sender passed invalid credentials in the struct ucred.') ||
         (errcode == EPIPE) && ('Remote socket was closed on a stream socket.  If enabled, a SIGPIPE is sent as well.   This  can  be  avoided  by  passing  the MSG_NOSIGNAL flag to send(2) or sendmsg(2).') || 
@@ -2289,14 +2289,14 @@ function
         (errcode == EFAULT) && (False) ||  
         (errcode == EINVAL) && (False) ||  
         (errcode == EISCONN) && (msg.msg_namelen != 0 && socket.socket_type == SOCK_STREAM && socket.socket_status == CONNECTED) ||  
-        (errcode == EMSGSIZE) && ('cmsg stuf' || get_msg_len(msg) > socket.socket_so_sndbuf) ||  
+        (errcode == EMSGSIZE) && (get_msg_len(msg) > socket.socket_so_sndbuf) ||  
         (errcode == ENOBUFS) && (False) ||  
         (errcode == ENOMEM) && (False) ||  
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) ||  
         (errcode == EOPNOTSUPP) && ('Some bit in the flags argument is inappropriate for the socket type.') ||
         (errcode == EPIPE) && ('Remote socket was closed on a stream socket.  If enabled, a SIGPIPE is sent as well.   This  can  be  avoided  by  passing  the MSG_NOSIGNAL flag to send(2) or sendmsg(2).') || 
         (errcode == ECONNRESET) && ('Remote socket was unexpectedly closed.') || # в состояние wait
-        (errcode == ENOENT) && ('Одной из директорий в пути для данного адреса не существует') ||
+        (errcode == ENOENT) && (\len(get_files_in_path(os, other_path)) == 0) ||
         (errcode == ENOTCONN) && (msg.msg_namelen == 0 && socket.socket_status != CONNECTED) ||
         (errcode == EPERM) && ('The sender passed invalid credentials in the struct ucred.') ||
         (errcode == EPROTOTYPE) && (socket.socket_type != other.socket_type) ||
@@ -2416,6 +2416,26 @@ end
 
 
 
+event is_all_files_in_path_dirs
+params
+    os      @IN  : OS
+    current @IN  : Process
+    path    @IN  : Text
+    res     @OUT : Bool
+function
+    files = get_files_in_path(os, path)
+    
+    for (i in [0..\len(files) - 1]) {
+        if (files(i).file_type != DIRECTORY_TYPE) {
+            return False
+        }
+    }
+    
+    return True
+end
+    attr algorithm: 'Алгоритм проверки ошибки ENOTDIR'
+
+
 event access_to_write
 params
     os      @IN  : OS
@@ -2426,7 +2446,7 @@ function
     files = get_files_in_path(os, path)
     
     if (\len(files) == 0) {
-        return False # это другая ош
+        return True # это другая ошибка
     } else {
         for (i in [0..\len(files) - 1]) {
             if (access(os, current, EXEC, files(i))) {
@@ -2442,9 +2462,6 @@ function
     return True
 end
     attr algorithm: 'Алгоритм, проверяющий наличие доступа на запись, для файла'
-
-
-#TODO -32 для размера сокета...
 
 
 note 'OBJTREE_NOTE' is
