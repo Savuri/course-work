@@ -1,5 +1,4 @@
-# 3 перевода строки - разделение между объектами/событиями
-# 1 перевода строки разделение между атрибутами
+# 1 перевода строки внутри объекта
 module 'Абстрактные модели'
   attr target_object: 'система'
 
@@ -647,10 +646,9 @@ params
     sockfd  @IN  : Nat
     sock    @OUT : Socket
 function
-    #res = \deref(current.proc_fds(sockfd).fd_open_file_ref->of_private_data)
-    #return res
     return \deref(current.proc_fds(sockfd).fd_open_file_ref->of_private_data)
 end
+    attr text: 'сокет, соответствующий файловому дескриптору {sockfd}'
 
 
 # Для сокращения
@@ -674,7 +672,9 @@ params
     opefile @OUT : OpenFile
 function
     return \deref(current.proc_fds(fd).fd_open_file_ref)
-end
+end    
+    attr text: 'открытый файл, соответствующий файловому дескриптору {fd}'
+
 
 action add_to_map
 params
@@ -804,7 +804,7 @@ function
     
     socket.socket_address := sockaddr->sun_path
     
-    if (addrlen == 'sizeof(sa_family_t)') { # Autobind feature -- Linux feature
+    if (addrlen == sizeof('sa_family_t')) { # Autobind feature -- Linux feature
         forany(newUnixAddress : Text | newUnixAddress \notisin \dom(os.os_socket_table) && \len(newUnixAddress) == 6 && newUnixAddress(0) == '\0' && newUnixAddress(1) \isin AutoBindAlphabet && newUnixAddress(2) \isin AutoBindAlphabet && newUnixAddress(3) \isin AutoBindAlphabet && newUnixAddress(4) \isin AutoBindAlphabet && newUnixAddress(5) \isin AutoBindAlphabet) {
             socket.socket_address := sock_address
             socket.socket_addrlen := 6 # One byte \0 + 5 of autobind address The change to 5 bytes came in Linux 2.3.15.)
@@ -829,11 +829,23 @@ end
 
 
 
-const SOMAXCONN : Nat // значение в /proc/sys/net/core/somaxconn файле
+
+
+const SOMAXCONN : Nat // максимально возможный размер очереди запросов на подключение (значение в /proc/sys/net/core/somaxconn файле)
+
+
+function listen is
+/**
+ * @param sockfd  IN файловый дескриптор.
+ * @param backlog IN числовой параметр, определяющий максиманльную длину очереди запросов на подключение.
+ * @return код ошибки.
+ */
+int listen(int sockfd, int backlog);
+end
 
 
 
-event listen // listen
+event listen // вызов функции listen
 params
     os       @IN  : OS
     current  @IN  : Process
@@ -845,7 +857,7 @@ function
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
            	return -1
           }
     }
@@ -1387,7 +1399,8 @@ params
     sock @IN  : Socket
     ret  @OUT : Nat
 function
-    // Как-то связано с so_sndbuf. Как это посчитать не знаю
+    * максимальное число отправленных сообщений в очереди
+    # Как-то связано с so_sndbuf. Как это посчитать не знаю
 end
 
 
@@ -1465,9 +1478,6 @@ params
     flags    @IN  : MsgFlags
     ret      @OUT : Int
 function
-    
-
-
     socket = get_sock_data(current, sockfd)
     if (socket.socket_type == SOCK_DGRAM) {
         other = get_by_address(os, msg->msg_name)
@@ -1893,8 +1903,8 @@ function
     if (\deref(addrlen) > socket.socket_addrlen) {
         address->sun_family := AF_UNIX
         address->sun_path := socket.socket_peer.socket_name
-    } else { // Buffer is too small
-        truncate_address(address) // Truncate address
+    } else { # Buffer is too small
+        truncate_address(address) # Truncate address
     }
     
     \deref(addrlen) := socket_addrlen
@@ -1994,7 +2004,7 @@ function
     return {. errcode for errcode : Error | (errcode == EACCES) && (abs_path(0) != "\0" && !access_to_write(os, current, abs_path)) ||
         (errcode == EADDRINUSE) && (abs_path \isin \dom(os.os_socket_table)) || 
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
-        (errcode == EINVAL) && (socket.socket_addrlen != 0 || (addrlen != 'sizeof(struct sockaddr_un)' && addrlen != 'sizeof(sa_family_t)')) || 
+        (errcode == EINVAL) && (socket.socket_addrlen != 0 || (addrlen != sizeof('struct sockaddr_un') && addrlen != sizeof('sa_family_t'))) || 
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) || 
         (errcode == EADDRNOTAVAIL) && (False) || 
         (errcode == EFAULT) && (False) ||
@@ -2023,7 +2033,8 @@ function
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) || 
         (errcode == EOPNOTSUPP) && (socket.socket_type == SOCK_DGRAM).}
-end
+end    
+    attr text: 'множество ошибок, которые должны произойти при вызове функции listen с параметрами {sockfd}, {backlog}'
 
 
 
@@ -2080,7 +2091,7 @@ function
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
         (errcode == ECONNABORTED) && (False) || 
         (errcode == EFAULT) && (False) ||
-        (errcode == EINVAL) && (\deref(addrlen) != 'sizeof(struct sockaddr_un)' || socket.socket_status != LISTEN) || 
+        (errcode == EINVAL) && (\deref(addrlen) != sizeof('struct sockaddr_un') || socket.socket_status != LISTEN) || 
         (errcode == EMFILE) && (set_len(\dom(current.proc_fds)) == MAX_FDS_PER_PROC) ||
         (errcode == ENFILE) && (set_len(os.os_open_file_table) == MAX_OPEN_FILES) ||
         (errcode == ENOBUFS) && (False) || 
@@ -2112,7 +2123,7 @@ function
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
         (errcode == ECONNABORTED) && (False) || 
         (errcode == EFAULT) && (False) ||
-        (errcode == EINVAL) && (\deref(addrlen) != 'sizeof(struct sockaddr_un)' || socket.socket_status != LISTEN) || 
+        (errcode == EINVAL) && (\deref(addrlen) != sizeof('struct sockaddr_un') || socket.socket_status != LISTEN) || 
         (errcode == EMFILE) && (set_len(\dom(current.proc_fds)) == MAX_FDS_PER_PROC) ||
         (errcode == ENFILE) && (set_len(os.os_open_file_table) == MAX_OPEN_FILES) ||
         (errcode == ENOBUFS) && (False) || 
@@ -2191,7 +2202,7 @@ function
     
     return {. errcode for errcode : Error | (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
         (errcode == EFAULT) && (False) || 
-        (errcode == EINVAL) && (\deref(addrlen) != 'sizeof(sockaddr_un)') || 
+        (errcode == EINVAL) && (\deref(addrlen) != sizeof('sockaddr_un')) || 
         (errcode == ENOBUFS) && (False) || 
         (errcode == ENOTCONN) && (socket.socket_status != CONNECTED) || 
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) .}
@@ -2212,7 +2223,7 @@ function
     
     return {. errcode for errcode : Error | (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
         (errcode == EFAULT) && (False) || 
-        (errcode == EINVAL) && (\deref(addrlen) != 'sizeof(sockaddr_un)') || 
+        (errcode == EINVAL) && (\deref(addrlen) != sizeof('sockaddr_un')) || 
         (errcode == ENOBUFS) && (False) || 
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) .}
 end
@@ -2462,6 +2473,16 @@ function
     return True
 end
     attr algorithm: 'Алгоритм, проверяющий наличие доступа на запись, для файла'
+
+
+
+logical sizeof
+  params
+    T   @IN      @CTYPE
+    res @OUT   : Int # size_t
+end
+  attr text: 'sizeof({T})'
+
 
 
 note 'OBJTREE_NOTE' is
