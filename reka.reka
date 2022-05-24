@@ -221,6 +221,9 @@ is
 $enumdefs$
 endtype
 
+type sa_family_t = AddressFamily
+
+
 type Protocol:
 enum
     PF_UNIX // == PF_LOCAL
@@ -283,13 +286,13 @@ is
 **Error** - перечисление всех кодов ошибок, которые могут возникать в событиях.
 endtype
 
-type Sockaddr_un : struct
+type sockaddr_un : struct
 {
     AddressFamily sun_family;
     Text sun_path;
 }
 is
-**Sockaddr_un** - соотвествующая си структура, которая передаётся, например, в *bind*.
+**sockaddr_un** - соотвествующая си структура, которая передаётся, например, в *bind*.
 endtype
 
 type ShutdownParam:
@@ -567,9 +570,9 @@ const MAX_SO_SNDBUF : Nat // Значение в /proc/sys/net/core/wmem_max
 logical to_sockaddr_ref
 params
     prm1 @IN  : void*
-    ret  @OUT : Sockaddr_un-ref
+    ret  @OUT : sockaddr_un-ref
 function
-    * Преобразует указатель в Sockaddr_un-ref
+    * Преобразует указатель в sockaddr_un-ref
 end
 
 
@@ -594,7 +597,7 @@ function
 end
 
 
-
+# TODO: action : взятия, удаления, возвращения
 logical get_list_head // Взять первый элемент списка l с удалением.
 params
     T    @TYPE
@@ -784,7 +787,7 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Int
-    sockaddr @IN  : Sockaddr_un*
+    sockaddr @IN  : sockaddr_un*
     addrlen  @IN  : Nat
     ret      @OUT : Int
 function    
@@ -874,7 +877,8 @@ function
         
     return 0
 end
-
+    attr summary-cfg: True
+    attr algo-tree: True
 
 
 logical is_free_space_in_backlog
@@ -903,7 +907,7 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Int
-    sockaddr @IN  : Sockaddr_un-ref
+    sockaddr @IN  : sockaddr_un-ref
     addrlen  @IN  : Nat
     ret      @OUT : Int 
 function
@@ -982,7 +986,7 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    sockaddr @IN  : Sockaddr_un-ref
+    sockaddr @IN  : sockaddr_un-ref
     addrlen  @IN  : Nat*
     flags    @IN  : SockType-set
     ret      @OUT : Int
@@ -1056,7 +1060,7 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    sockaddr @IN  : Sockaddr_un-ref
+    sockaddr @IN  : sockaddr_un-ref
     addrlen  @IN  : Nat*
     ret      @OUT : Int
 function
@@ -1536,6 +1540,15 @@ params
     flags    @IN  : MsgFlags
     ret      @OUT : Int
 function
+    possible_errors = sendmsg_errors(os, current, sockfd, msg, flags)
+    
+    if (possible_errors != {. .}) {
+        forany(error : Int | error \isin possible_errors) {
+  	        current.proc_errno := error
+            return -1
+        }
+    }
+
     sendmsg_generic(os, current, sockfd, msg, flags)
 end
 
@@ -1547,13 +1560,22 @@ params
     buf      @IN  : void*
     len      @IN  : Nat
     flags    @IN  : MsgFlags
-    dst      @IN  : Sockaddr_un-ref
+    dst      @IN  : sockaddr_un-ref
     addrlen  @IN  : Nat
     ret      @OUT : Int    
 function
     #sendto TODO если получатель не указан установить получаетля peer'ом
 
     msg = 'mk_msg(.msg_name = dst->address, .msg_name_len = addrlen, .msg_iov = \ref({buf, len}), .msg_control = 0, .msg_controllen = 0, .msg_flags = 0)'
+    
+    possible_errors = sendmsg_errors(os, current, sockfd, \ref(msg), flags)
+    
+    if (possible_errors != {. .}) {
+        forany(error : Int | error \isin possible_errors) {
+  	        current.proc_errno := error
+            return -1
+        }
+    }
     
     sendmsg_generic(os, current, sockfd, \ref(msg), flags)
 end
@@ -1574,6 +1596,15 @@ function
     
     msg = 'mk_msg(.msg_name = socket123.socket_peer.socket_address, .msg_name_len = socket123.socket_peer.socket_address_len, .msg_iov = \ref({buf, len}), .msg_control = 0, .msg_controllen = 0, .msg_flags = 0)'
     
+    possible_errors = sendmsg_errors(os, current, sockfd, \ref(msg), flags)
+    
+    if (possible_errors != {. .}) {
+        forany(error : Int | error \isin possible_errors) {
+  	        current.proc_errno := error
+            return -1
+        }
+    }
+    
     sendmsg_generic(os, current, sockfd, \ref(msg), flags)
 end
 
@@ -1591,6 +1622,15 @@ function
     socket123 = get_sock_data(current, sockfd) # Там потом имя с socket из sendmsg_generic накладывается
     
     msg = 'mk_msg(msg_name = socket123.socket_peer.socket_address, msg_name_len = socket123.socket_peer.socket_address_len, ioveclist = &{buf, count}, msg_control = 0, msg_controllen = 0, msg_flags = 0)'
+    
+    possible_errors = sendmsg_errors(os, current, sockfd, \ref(msg), \emptyset)
+    
+    if (possible_errors != {. .}) {
+        forany(error : Int | error \isin possible_errors) {
+  	        current.proc_errno := error
+            return -1
+        }
+    }
     
     sendmsg_generic(os, current, sockfd, \ref(msg), \emptyset)
 end
@@ -1821,11 +1861,20 @@ params
     buf      @IN  : void*
     len      @IN  : Nat
     flags    @IN  : Nat-set
-    src      @IN  : Sockaddr_un-ref
+    src      @IN  : sockaddr_un-ref
     addrlen  @IN  : Nat*
     ret      @OUT : Int  
 function
     msg = 'mk_msg(.msg_name = src->address, .msg_name_len = \deref(addrlen), .msg_iov = \ref({buf, len}), .msg_control = 0, .msg_controllen = 0, .msg_flags = 0)'
+    
+    possible_errors = recvmsg_errors(os, current, sockfd, msg, flags)
+    
+    if (possible_errors != {. .}) {
+          forany(error : Int | error \isin possible_errors) {
+  	        current.proc_errno := error
+           	return -1
+          }
+    }
     
     recvmsg_generic(os, current, sockfd, msg, flags, addrlen)
 end
@@ -1845,6 +1894,15 @@ function
     
     msg = 'mk_msg(.msg_name = socket123.socket_peer.socket_address, .msg_name_len = socket123.socket_peer.socket_address_len, .msg_iov = \ref({buf, len}), .msg_control = Nothing, .msg_controllen = 0, .msg_flags = 0)'
     
+    possible_errors = recvmsg_errors(os, current, sockfd, msg, flags)
+    
+    if (possible_errors != {. .}) {
+          forany(error : Int | error \isin possible_errors) {
+  	        current.proc_errno := error
+           	return -1
+          }
+    }
+    
     recvmsg_generic(os, current, sockfd, msg, flags, to_nat_pointer(NULL))
 end
 
@@ -1863,6 +1921,15 @@ function
     
     msg = 'mk_msg(.msg_name = socket123.socket_peer.socket_address, .msg_name_len = socket123.socket_peer.socket_address_len, .msg_iov = \ref({buf, len}), .msg_control = 0, .msg_controllen = 0, .msg_flags = 0)'
     
+    possible_errors = recvmsg_errors(os, current, sockfd, msg, \emptyset)
+    
+    if (possible_errors != {. .}) {
+          forany(error : Int | error \isin possible_errors) {
+  	        current.proc_errno := error
+           	return -1
+          }
+    }
+    
     recvmsg_generic(os, current, sockfd, msg, \emptyset, to_nat_pointer(NULL))
 end
 
@@ -1871,7 +1938,7 @@ end
 
 action truncate_address // Заполнить всю структуру нулями. 
 params
-    addr    @IN : Sockaddr_un-ref
+    addr    @IN : sockaddr_un-ref
 function
     * Заполнить всю структуру нулями.
 end
@@ -1885,7 +1952,7 @@ params
     os      @IN  : OS
     current @IN  : Process
     sockfd  @IN  : Nat
-    address @IN  : Sockaddr_un-ref
+    address @IN  : sockaddr_un-ref
     addrlen @IN  : Nat*
     ret     @OUT : Int
 function
@@ -1919,7 +1986,7 @@ params
     os      @IN  : OS
     current @IN  : Process
     sockfd  @IN  : Nat
-    address @IN  : Sockaddr_un-ref
+    address @IN  : sockaddr_un-ref
     addrlen @IN  : Nat*
     ret     @OUT : Int
 function
@@ -1992,7 +2059,7 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    sockaddr @IN  : Sockaddr_un*
+    sockaddr @IN  : sockaddr_un*
     addrlen  @IN  : Nat
     ret      @OUT : Error-set
 function
@@ -2004,7 +2071,7 @@ function
     return {. errcode for errcode : Error | (errcode == EACCES) && (abs_path(0) != "\0" && !access_to_write(os, current, abs_path)) ||
         (errcode == EADDRINUSE) && (abs_path \isin \dom(os.os_socket_table)) || 
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
-        (errcode == EINVAL) && (socket.socket_addrlen != 0 || (addrlen != sizeof('struct sockaddr_un') && addrlen != sizeof('sa_family_t'))) || 
+        (errcode == EINVAL) && (socket.socket_addrlen != 0 || (addrlen != sizeof('sockaddr_un') && addrlen != sizeof('sa_family_t'))) || 
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) || 
         (errcode == EADDRNOTAVAIL) && (False) || 
         (errcode == EFAULT) && (False) ||
@@ -2043,7 +2110,7 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Int
-    sockaddr @IN  : Sockaddr_un-ref
+    sockaddr @IN  : sockaddr_un-ref
     addrlen  @IN  : Nat
     server   @IN  : Socket
     ret      @OUT : Error-set
@@ -2077,7 +2144,7 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    sockaddr @IN  : Sockaddr_un-ref
+    sockaddr @IN  : sockaddr_un-ref
     addrlen  @IN  : Nat*
     ret      @OUT : Error-set    
 function
@@ -2091,7 +2158,7 @@ function
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
         (errcode == ECONNABORTED) && (False) || 
         (errcode == EFAULT) && (False) ||
-        (errcode == EINVAL) && (\deref(addrlen) != sizeof('struct sockaddr_un') || socket.socket_status != LISTEN) || 
+        (errcode == EINVAL) && (\deref(addrlen) != sizeof('sockaddr_un') || socket.socket_status != LISTEN) || 
         (errcode == EMFILE) && (set_len(\dom(current.proc_fds)) == MAX_FDS_PER_PROC) ||
         (errcode == ENFILE) && (set_len(os.os_open_file_table) == MAX_OPEN_FILES) ||
         (errcode == ENOBUFS) && (False) || 
@@ -2108,7 +2175,7 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    sockaddr @IN  : Sockaddr_un-ref
+    sockaddr @IN  : sockaddr_un-ref
     addrlen  @IN  : Nat*
     flags    @IN  : SockType-set
     ret      @OUT : Error-set    
@@ -2123,7 +2190,7 @@ function
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
         (errcode == ECONNABORTED) && (False) || 
         (errcode == EFAULT) && (False) ||
-        (errcode == EINVAL) && (\deref(addrlen) != sizeof('struct sockaddr_un') || socket.socket_status != LISTEN) || 
+        (errcode == EINVAL) && (\deref(addrlen) != sizeof('sockaddr_un') || socket.socket_status != LISTEN) || 
         (errcode == EMFILE) && (set_len(\dom(current.proc_fds)) == MAX_FDS_PER_PROC) ||
         (errcode == ENFILE) && (set_len(os.os_open_file_table) == MAX_OPEN_FILES) ||
         (errcode == ENOBUFS) && (False) || 
@@ -2193,7 +2260,7 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    address  @IN  : Sockaddr_un-ref
+    address  @IN  : sockaddr_un-ref
     addrlen  @IN  : Nat*
     ret      @OUT : Error-set
 function
@@ -2215,7 +2282,7 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    address  @IN  : Sockaddr_un-ref
+    address  @IN  : sockaddr_un-ref
     addrlen  @IN  : Nat*
     ret      @OUT : Error-set
 function
