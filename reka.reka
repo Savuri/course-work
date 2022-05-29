@@ -15,15 +15,15 @@ type Uids : Uid-set
 
 type Permission:
 enum
-    S_IRUSR                       
-    S_IWUSR                        
-    S_IXUSR                   
-    S_IRGRP
-    S_IWGRP
-    S_IXGRP
-    S_IROTH
-    S_IWOTH
-    S_IXOTH
+    S_IRUSR // чтение для пользователя
+    S_IWUSR // запись для пользователя
+    S_IXUSR // исполнение для пользователя
+    S_IRGRP // чтение для группы
+    S_IWGRP // запись для группы
+    S_IXGRP // исполнение для группы
+    S_IROTH // чтение для других
+    S_IWOTH // запись для других
+    S_IXOTH // исполнение для других
 endtype
 
 
@@ -54,34 +54,23 @@ type Fcred : struct
     Gid fc_gid;
     Permissions fc_permission;
 }
+is
+**Fred** - структура, хранящая информацию о правах доступа файла
 endtype
 
-# Раздел сигналов - Beg
-#type Handler  -- не нужно
-#type Handler3 -- не нужно
+
 type Sigset : Nat-set
-type SignalFlag: # Мне достаточно описать SA_RESTART
+type SignalFlag:
 enum
-    SA_RESTART // Перезапустить определённый системный вызов.
+    SA_RESTART // перезапустить системный вызов.
 endtype
 type SignalFlags : SignalFlag-set
 
-type Sigaction : struct
-{
-    #Handler hand; // Обработчик с одним параметром.
-    #Handler3 sigact; // Обработчик с 3мя параметрами.
-    SignalFlags signal_flags; // Флаги сигналов.
-    #Sigset sigset; // contains a bitmask with exactly one bit for each signal available in the system. It is used to block other signals during execution of the handler routine. Мне это не нужно.
-}
-is
-**Sigaction** - структура, описывающая работу с сигналами. 
-endtype
-# Раздел сигналов - End
 
 type ProcStatus:
 enum
-    R // running or runnable (on run queue)
-    S // interruptible sleep (waiting for an event to complete) (В этом состоянии процесc при блокировке)
+    R // running or runnable (процесс исполняется)
+    S // interruptible sleep, waiting for an event to complete (В этом состоянии процесc при блокировке)
 is
 **ProcStatus** - перечислимый тип, содержащий статус текущего процесса:
 $enumdefs$
@@ -91,7 +80,7 @@ type FdFlag:
 enum
     FD_CLOEXEC // close on exec
 is
-**FdFlag** - тип для флагов, которые приписаны к файловому дескриптору на уровне конкретного процесса:
+**FdFlag** - перечислимый тип для флагов файловых дескрипторов:
 $enumdefs$
 endtype
 
@@ -101,7 +90,7 @@ enum
     DIRECTORY_TYPE    // директория
     SOCKET_TYPE       // сокет
 is
-**FileType** - перечислимы тип, описывающий типы файлов:
+**FileType** - перечислимый тип, описывающий типы файлов:
 $enumdefs$
 endtype
 
@@ -112,16 +101,15 @@ enum
     O_RDWR    // доступ и на чтение, и на запись
     O_NONBLOCK  // запрет блокировки
 is
-**OpenFileType** перечисление флагов открытых файлов:
+**OpenFileType** перечислимый тип для флагов открытых файлов:
 $enumdefs$
 endtype
-
 
 
 type OpenFileRefArray : OpenFile-ref-list
 
 
-type sk_buff : struct 
+type sk_buff : struct #Для *SOCK_DGRAM* и *SOCK_SEQPACKET*, можно сказать, предстваляет получаемую датаграмму. Для *SOCK_STREAM* буфферы будут читаться последовательно, отмечая уже прочитанные данные, учёт которых происходит в *consumed*. При *consumed* == *len* буффер считается полностью прочитанным и удаляется из очереди.
 {
     void* buf_data; // буффер в котором передаются данные
     Nat data_len; // количество байт данных
@@ -129,23 +117,25 @@ type sk_buff : struct
     void* buf_control_data; // буффер дополнительных данных
     Nat control_len; // количетсво байт дополнительных данных
     Text sender; // адрес отправителя
-    OpenFileRefArray of_arr; // of
-    Nat of_arr_len;
+    OpenFileRefArray of_arr; // ссылки на откртые файлы файловых дескрипторов, которые передаются в сообщении
 }
 is
-**sk_buff** - данные внутри каждого буффера. Для *SOCK_DGRAM* и *SOCK_SEQPACKET*, можно сказать, предстваляет получаемую датаграмму. Для *SOCK_STREAM* буфферы будут читаться последовательно, отмечая уже прочитанные данные, учёт которых происходит в *consumed*. При *consumed* == *len* буффер считается полностью прочитанным и удаляется из очереди. 
+**sk_buff** - тип для описания передачи данных в сокетах
 endtype
+
+
 
 type SocketStatus:
 enum
-    UNCONNECTED
-    CONNECTING
-    CONNECTED
-    LISTEN
-    LISTENING
-    TCP_CLOSED 
+    UNCONNECTED // не подсоединён
+    CONNECTING // подключается
+    CONNECTED // подключён
+    LISTEN // сокет является слушающим
+    LISTENING // в данный момент сокет пытается принять сокет на подключение
+    CLOSED // закрыт
 is
-**SocketStatus** - перечисление, в которых может находится сокет. 
+**SocketStatus** - перечеслимый тип, в которых может находится сокет
+$enumdefs$
 endtype
 
 type SocketFlag: 
@@ -193,51 +183,53 @@ enum
        SO_TYPE
        SO_BUSY_POLL //(since Linux 3.11)
 is
-**SocketFlag** - перечесление флагов сокета.    
+**SocketFlag** - перечеслимый тип флагов сокета
 end
 
 type SocketFlags : SocketFlag-set
 
 type SockType: # Чтобы закинуть, к примеру SOCK_NONBLOCK и SOCK_STREAM в один set. Пусть будет один тип.
 enum
-    SOCK_STREAM
-    SOCK_DGRAM
-    SOCK_SEQPACKET
-    SOCK_RAW
-    SOCK_RDM
-    SOCK_PACKET
-    SOCK_NONBLOCK
-    SOCK_CLOEXEC
+    SOCK_STREAM // потоковый
+    SOCK_DGRAM // датаграммный
+    SOCK_SEQPACKET // датаграмнный, ориентированный на подключение
+    SOCK_RAW // в терминах unix сокетов синоним датаграмнного
+   # SOCK_RDM
+   # SOCK_PACKET
+    SOCK_NONBLOCK // флаг отвечающий за отсутсвие блокировки операций над сокетом 
+    SOCK_CLOEXEC // флаг отвечающий за закрытие файлового дескриптора при вызове функции из семейства exec
 is
-**SockType** - перечисление типов сокетов.
+**SockType** - перечеслимый тип для типов и флагов сокетов:
+$enumdefs$
 endtype
 
 type ShutdownFlags:
 enum
-    RCV_SHUTDOWN   // Сокет не может читать 
-    SEND_SHUTDOWN  // Сокет не может писать
+    RCV_SHUTDOWN   // сокет не может читать 
+    SEND_SHUTDOWN  // сокет не может писать
 endtype
 
 type AddressFamily:
 enum
-    AF_UNIX // == AF_LOCAL
-    AF_UNSPEC
+    AF_UNIX // то же самое, что и AF_LOCAL
 is 
-**AddressFamily** - перечесление семейств адрессов. В данной модели рассматривается только *AF_UNIX*. 
- 
+**AddressFamily** - перечеслимый тип семейств адрессов. В данной модели рассматривается только *AF_UNIX*
 $enumdefs$
 endtype
 
 type sa_family_t = AddressFamily
+type sockaddr = sockaddr_un # модель для unix сокетов
+type socklen_t = Nat
+type ssize_t = Nat
+type size_t = Nat
 
 
 type Protocol:
 enum
-    PF_UNIX // == PF_LOCAL
-    PF_UNSPEC
+    PF_UNIX // протокол unix сокетов
+    PF_UNSPEC // протокол поумолчанию
 is
 **Protocol** - протоколы:
-
 $enumdefs$
 endtype
 
@@ -290,34 +282,32 @@ enum
     EDESTADDRREQ
     EMSGSIZE
 is
-**Error** - перечисление всех кодов ошибок, которые могут возникать в событиях.
+**Error** - перечеслимый тип ошибок, которые могут возникать в событиях
 endtype
 
 type sockaddr_un : struct
 {
     AddressFamily sun_family;
-    Text sun_path;
+    Char* sun_path;
 }
 is
-**sockaddr_un** - соотвествующая си структура, которая передаётся, например, в *bind*.
+**sockaddr_un** - структура, представляющая собой адрес unix сокет, которая передаётся, например, в *bind*
 endtype
 
 type ShutdownParam:
 enum
-    SHUT_RD
-    SHUT_WR
-    SHUT_RDWR
+    SHUT_RD // закрыть чтение
+    SHUT_WR // закрыть запись
+    SHUT_RDWR // закрыть чтение и запись
 is
-**ShutdownParam** - перечисление возможных значений параметра *how* в систменов вызове *shutdown*
+**ShutdownParam** - перечисление возможных значений параметра *how* в системном вызове *shutdown*
+$enumdef$
 endtype
-
 
 type Level:
 enum
-    SOL_SOCKET
-is
-**SOL_SOCKET** - опции для всех сокетов или опции только юниксовых соектов
-end
+    SOL_SOCKET // глобальные опции сокетов или опции unix сокетов
+endtype
 
 type MsgFlag:
 enum
@@ -335,34 +325,29 @@ enum
     MSG_OOB # Unix socket does not support this flag -> EINVAL как я понимаю
     
 is
-*MsgFlgas* - тип всех флагов для функций sendto, recvfrom
+**MsgFlgas** - перечислимый тип флагов для функций вводы/вывода сокетов
 endtype
 
 type CmsgType:
 enum
-    SCM_RIGHTS // SCM_RIGHTS 
-    SCM_CREDENTIALS // SCM_CREDENTIALS  
-    SCM_SECURITY // SCM_SECURITY 
+    SCM_RIGHTS 
+    SCM_CREDENTIALS  
+    SCM_SECURITY
 is
-*cmsg_type* - тип дополнительных данных в msghdr.  
-$enumdefs$
+**CmsgType** - перечислимый тип дополнительных данных в msghdr
 end
-
-
-
 
 type cmsghdr : struct {
     Nat cmsg_len;
     Level cmsg_level;
     CmsgType cmsg_type;
-    Char* cmsg_data; // char cmsg_data[]
+    Char* cmsg_data;
 }
 is
-*cmsghdr* - структура данных, для загрузки дополнительных данных в msghdr.
+**cmsghdr** - структура данных, для дополнительных данных в msghdr
 end
 
-#TODO: The maximum ancillary buffer size allowed per socket can be set using /proc/sys/net/core/optmem_max
-
+const MAX_ANCILLARY_BUFFER : Nat // значение в /proc/sys/net/core/optmem_max
 
 type MsgFlags : MsgFlag-set
 
@@ -374,12 +359,11 @@ is
 **iovec** - iovec для msghndr
 endtype
 
-type ioveclist : iovec-list
 
 type msghdr : struct {
-    Text      msg_name;
+    Char*     msg_name;
     Nat       msg_namelen;
-    ioveclist msg_iov;
+    iovec*    msg_iov;
     Nat       msg_iovlen;
     void*     msg_control;
     Nat       msg_controllen;
@@ -405,64 +389,62 @@ object OS is
 end
 
 objattr os_open_file_table : OpenFile-set is
-**os_open_file_table** - таблица открытых файлов ОС. В этой таблице происходит регистрация всех открытых в системе файлов.
+**os_open_file_table** - таблица открытых файлов ОС. В этой таблице происходит регистрация всех открытых в системе файлов
 end
 
 objattr os_files : File-list is
-**os_files** - множество всех файлов в файловой системе.
+**os_files** - список всех файлов в файловой системе
 end
 
 objattr os_proceses : Process-set is 
-**Proos_procesescesses** - множество процессов в системе.
+**os_proceses** - множество процессов в системе
 end
 
 objattr os_socket_table : Text -m-> Socket is
-**os_socket_table** - отображение адресса unix сокета (т.е. строки) в сокет с таким адресом.
+**os_socket_table** - таблица сокетов (отображение адресса unix сокета (т.е. строки) в объект сокет с таким адресом)
 end
 
 objattr os_users : Uid-set is
-**os_users** - множество всех пользователей, зарегистрированных в системе. (/etc/passwd)
+**os_users** - множество всех пользователей, зарегистрированных в системе (/etc/passwd)
 end
 
 objattr os_groups : Gid-set is
-**os_groups** - множество всех пользователей, зарегистрированных в системе. (/etc/group)
+**os_groups** - множество всех групп, зарегистрированных в системе (/etc/group)
 end
 endobject
 
 
 
 object Process is
-**Process** - отдельный процесс ОС.
+**Process** - объект, представляющий отдельный процесс ОС
 end
 
 objattr proc_pid : Int is
-**proc_pid** - уникальный идентификатор процесса.
+**proc_pid** - уникальный идентификатор процесса
 end
 
 objattr proc_errno : Int is
-**proc_errno** - атрибут, хранящий целочисленный код последней ошибки.
+**proc_errno** - атрибут, хранящий целочисленный код последней ошибки
 end
 
 objattr proc_fds : Nat -m-> Fd is 
-**proc_fds** - таблица открытых файловых дескрипторов процесса.
+**proc_fds** - таблица открытых файловых дескрипторов процесса
 end
 
 objattr proc_cred : Cred is
-**proc_cred** - информация о правах процесса.
-end
-
-objattr proc_sigaction_array : Nat -m-> Sigaction is
-**proc_sigaction_array** - информация об обработчиках сигналов процесса.
-Отображение номера сигнала в стрктуру с информацией об обрабатывании этого
-сигнала.
+**proc_cred** - информация о правах процесса
 end
 
 objattr proc_pending_signals : Nat-list is
-**proc_pending_signals** - номера сигналов, пришедших на обработку. 
+**proc_pending_signals** - список номеров сигналов, пришедших на обработку
+end
+
+objattr proc_signal_flags : Nat -m-> SignalFlags is
+**proc_signal_flags** - отображение номера сигнала в множество флагов этого сигнала
 end
 
 objattr proc_blocked_signals : Sigset is
-**proc_blocked_signals** - в этом множестве находятся номера заблокированных для обработки сигналов.
+**proc_blocked_signals** - множество заблокированных для обработки сигналов (если номер сигнала есть, то этот сигнал не обрабатывается)
 end
 
 objattr proc_status : ProcStatus is 
@@ -477,15 +459,15 @@ endobject
 
 
 object Fd is
-**Fd** - файловый дескриптор.
+**Fd** - объект, представляющий собой файловый дескриптор
 end
 
 objattr fd_open_file_ref : OpenFile* is 
-**fd_open_file_ref** - ссылка на структуру с информацией об открытом файле.
+**fd_open_file_ref** - ссылка на структуру с информацией об открытом файле
 end
 
 objattr fd_flags : FdFlag-set is # Хотя возможен только один
-**fd_flags** - флаги, которые приписаны к файловому дескриптору на уровне конкретного процесса.
+**fd_flags** - флаги, которые приписаны к файловому дескриптору на уровне конкретного процесса
 end
 endobject
 
@@ -494,50 +476,50 @@ object File is
 end
 
 objattr file_path : Text is
-**file_path** - абсолютный путь до файла.
+**file_path** - абсолютный путь файла
 end
 
 objattr file_type : FileType is
-**file_type** - тип файла.
+**file_type** - тип файла
 end
 
 objattr file_cred : Fcred is
-**file_cred** - Информация об обладателе и правах доступа
+**file_cred** - информация об обладателе и правах доступа
 end
 endobject
 
 
 
 object OpenFile is 
-**OpenFile** хранит информацию об открытом файле. Например, такие данные, как флаги доступа, оступ в файле и т.д..
+**OpenFile** - объект, представляющий открытый файл в ОС
 end
 
 # Бывший of_op_type - операции определённые для этого типа. Этим хотелось выразить наличия поля op в стркутуре откртытого файла, с целью различения типов открытых файлов. Здесь он просто равен типу файлу.
 objattr of_type : FileType is
-**of_type** - тип открытого файла. # Дублирует тип File. Дублирование необходимо т.к. файла для сокета в ФС ещё может не быть, но подсмотреть тип файла для описание ошибочных ситуаций нужно.  
+**of_type** - тип открытого файла (дублирует тип файла)
 end
 
 objattr of_file : File* is
-**of_file** - хранит ссылку на соотвестующий этому **OpenFile**, объект **File**.
+**of_file** - хранит ссылку на соотвестующий этому **OpenFile**, объект **File**
 end
 
 objattr of_ref_cnt : Int is
-**of_ref_cnt** - число ссылающихся на эту запись файловых дескрипторов.
+**of_ref_cnt** - число ссылающихся на этот открытый файл файловых дескрипторов
 end
 
-objattr of_flags : OpenFileFlag-set is # Как-то не точно описано, но усложнять не хочется. (не точность в возможности присутствия одновременно O_RDONLY, и O_WRONLY, и O_RDWR, хотя в реальности возможно наличие только одного из них)  
-**of_flags** - флаги открытого файла. 
+objattr of_flags : OpenFileFlag-set is
+**of_flags** - флаги открытого файла
 end
 
 objattr of_private_data : Socket* is
-**of_private_data** - ссылка на важные структура данных. (Здесь находится ссылка на структуру сокет).
+**of_private_data** - ссылка на важные структура данных для различных типов открытого файла (ссылка на структуру сокет для сокета)
 end
 endobject
 
 
 
 object Socket is 
-**Socket** - объект представляющий собой UNIX сокет.
+**Socket** - объект, представляющий собой UNIX сокет.
 end
 
 objattr socket_status : SocketStatus is
@@ -549,79 +531,69 @@ objattr socket_name : Text is
 end
 
 objattr socket_address : Text is
-**socket_address** - адрес сокета.
+**socket_address** - адрес сокета
 end
 
 objattr socket_addrlen : Nat is
-**socket_addrlen** - длина адреса сокета.
+**socket_addrlen** - длина адреса сокета
 end
 
 objattr socket_queue : Socket-list is 
-**socket_queue** - очередь для accept.
+**socket_queue** - очередь поступивщих на подключение сокетов
 end
 
+#полностью настроенных сокетов, которые ждут принятия.
 objattr socket_backlog : Int is
-**socket_backlog** - длина очереди полностью настроенных сокетов, которые ждут принятия.
+**socket_backlog** - максимально возможная длина очереди **socket_queue**
 end
 
 objattr socket_peer : Socket-ref is
-**socket_peer** - ссылка на сокета-друга, с котором происходит общение.
+**socket_peer** - ссылка на объект сокета, с котором происходит общение
 end
 
 objattr socket_flags : SocketFlags is
-**socket_flags** - флаги сокета. Осуществлять управление этими флагами можно с помощью *setsockopt* и  *getsockopt*
+**socket_flags** - флаги сокета
 end
 
 objattr socket_type : SockType is
-**socket_type** - тип сокета.
+**socket_type** - тип сокета (без SOCK_NONBLOCK и SOCK_CLOEXEC. Эти флаги перешли в флаги открытого файла и файлового дескриптора этого сокета соотвественно)
 end
 
 objattr socket_shutdown_flags : ShutdownFlags-set is
-**socket_shutdown_flags** - флаги, обозначающие закрытие на операции чтения и записи, выполняемые этим сокетом. 
+**socket_shutdown_flags** - флаги, обозначающие закрытие на операции чтения и записи, выполняемые этим сокетом
 end
 
 objattr socket_buf : sk_buff-list is
-**socket_buf_list** - буффер сокета.
+**socket_buf_list** - список полученных буфферов сокета
 end
 
 objattr socket_so_sndbuf : Nat is
-**socket_so_buff** - размер буффера сокета. Значение, получаемое getsockopt() с SO_SNDBUF
+**socket_so_buff** - размер буффера сокета (значение, получаемое с помощью getsockopt() с параметром SO_SNDBUF)
 end
 
 objattr socket_used_buffer : Nat is
-**socket_used_buffer** - уже использованный количество байт буффера.
+**socket_used_buffer** - использованный объём буффера (в байтах) 
 end
 
 objattr socket_cur_buffer_cnt : Nat is
-**socket_cur_buffer_cnt** - количество уже выделенных буфферов.
+**socket_cur_buffer_cnt** - количество выделенных буфферов
 end
 endobject
-
 
 
 const DEFAULT_SO_SNDBUF : Nat // Значение в /proc/sys/net/core/wmem_default
 const MAX_SO_SNDBUF : Nat // Значение в /proc/sys/net/core/wmem_max
 
 
-logical to_sockaddr_ref
+logical to_sockaddr_pointer
 params
     T    @TYPE
     prm1 @IN  : T*
-    ret  @OUT : sockaddr_un-ref
+    ret  @OUT : sockaddr_un*
 function
-    * Преобразует указатель в sockaddr_un-ref
+    * Преобразует указатель в sockaddr_un
 end
-
-
-logical get_address
-params
-    T @TYPE
-    prm1 @IN  : T
-    ret  @OUT : T*
-function
-    * Взять адрес элемента
-end
-
+    attr text: '((sockaddr_un*) {prm1})'
 
 
 logical to_nat_pointer
@@ -632,7 +604,7 @@ params
 function
     * Преобразует указатель в Nat*
 end
-
+    attr text: '((unsigned*) {prm1})'
 
 
 logical to_int_pointer
@@ -643,7 +615,7 @@ params
 function
     * Преобразует указатель в Int*
 end
-
+    attr text: '((int*) {prm1})'
 
 logical to_char_pointer
 params
@@ -653,7 +625,7 @@ params
 function
     * Преобразует указатель в char*
 end
-
+    attr text: '((char*) {prm1})'
 
 
 logical to_void_pointer
@@ -662,9 +634,9 @@ params
     prm1 @IN  : T*
     ret  @OUT : void*
 function
-    * Преобразует указатель в char*
+    * Преобразует указатель в void*
 end
-
+    attr text: '((void*) {prm1})'
 
 
 
@@ -676,7 +648,7 @@ params
 function
     * Преобразует указатель в Ucred*
 end
-
+    attr text: '((Ucred*) {prm1})'
 
 logical to_cmsghdr_pointer
 params
@@ -684,40 +656,60 @@ params
     prm1 @IN  : T*
     ret  @OUT : cmsghdr*
 function
-    * Преобразует указатель в указатель на cmsghdr
+    * преобразует указатель в указатель на cmsghdr
 end
+    attr text: '((cmsghdr*) {prm1})'
+    
+ 
+logical to_text
+params
+    char_arr @IN  : Char*
+    arr_len  @IN  : Nat
+    ret      @OUT : Text
+function
+    * Вернуть абстрактный тип Text из массива символов
+end
+    attr text: '{char_arr}'
+    
+    
+logical to_char_arr
+params
+    text1    @IN  : Text
+    char_arr @OUT : Char*
+function
+    * Вернуть массив символов из абстрактного типа Text 
+end
+    attr text: '{text1}'
 
 
+logical generate_fd
+params
+    current @IN  : Process
+    fd      @OUT : Nat
+function
+    forany(newFD : Nat | newFD \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD) => nn \isin \dom(current.proc_fds)) {
+        return newFD
+    }
+end
+    attr text: 'свободный файловый дескриптор текущего процесса с номером таким, что все файловые дескрипторы с меньшим номером уже используются'
 
-action add_to_list // Добавить элемент в список l (по стратегии fifo).
+
+action add_to_list
 params
     T @TYPE
     l @IN : T-list
     el   @IN : T
 function 
-    l(\len l) := el
+    l(\len l) := el // !Добавить el в конец списка l
 end
 
 
-# TODO: action : взятия, удаления, возвращения
-logical get_list_head // Взять первый элемент списка l с удалением.
+action del_from_list
 params
-    T    @TYPE
-    l    @IN  : T-list
-    el   @OUT : T
+    T @TYPE
+    l @IN  : T-list
 function
-    * Взять первый элемент списка l с удалением.
-end
-
-
-
-action del_from_list // Удалить элемент idx из списка l.
-params
-    T    @TYPE
-    fifo @IN  : T-list
-    idx  @IN  : Nat
-function
-    * Удалить элемент idx из списка l.
+    * Удалить первый элемент из списка l.
 end
 
 
@@ -739,12 +731,11 @@ params
   set1 @IN   : T-set
   el   @IN   : T
 function
-  set1 := set1 \diff {. el .}
+  set1 := set1 \diff {. el .} // !Убрать el из set1 
 end 
 
 
 
-# Для сокращения записи
 logical get_sock_data // получить структуру данных для процесса current и сокета sockfd.
 params
     current @IN  : Process
@@ -755,9 +746,9 @@ function
 end
     attr text: 'сокет, соответствующий файловому дескриптору {sockfd}'
 
+# end of несмотрел
 
-# Для сокращения
-event get_by_address
+logical get_by_address
 params
     os        @IN  : OS
     sock_addr @IN  : Text
@@ -765,7 +756,7 @@ params
 function 
     return os.os_socket_table(sock_addr)
 end
-    attr algorithm: 'Алгоритм, выдающий структуру сокета по адрессу'
+    attr text: 'сокет, соотвествующий адресу {sock_addr}'
 
 
 
@@ -808,7 +799,20 @@ end
 const NULL : void*
 const Nothing // Константа для неинициализированных частей
 
-event socket // socket
+
+
+function socket is
+/**
+ * @param domain    IN домен
+ * @param sock_type IN тип и флаги сокета, соединеные через битовое OR
+ * @param protocol  IN протокол домена 
+ * @return файловый дескриптор в случае успешного выполнения, иначе -1.
+ */
+int socket(int domain, int sock_type, int protocol);
+end
+
+
+event socket // вызов функции socket
 params
     os        @IN  : OS
     current   @IN  : Process
@@ -817,32 +821,32 @@ params
     protocol  @IN  : Protocol
     fd        @OUT : Int
 invariant domain == AF_UNIX # Модель только для UNIX сокетов
-invariant current \isin os.os_proceses # Текущей процесс существует в рамках системы
 function
     possible_errors = socket_errors(os, current, domain, sock_type, protocol)
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
            	return -1
           }
     }
 
     newFD = generate_fd(current)
-    socket = 'mk_socket(.socket_status=UNCONNECTED, .socket_address=Nothing, .socket_addrlen=Nothing, .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=Nothing, .socket_flags={. .}, .socket_type=Nothing, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(), socket_so_sndbuf=DEFAULT_SO_SNDBUF, .socket_used_buffer=0, .socket_cur_buffer_cnt=0)'
+    newSocket = 'mk_socket(.socket_status=UNCONNECTED, .socket_address=Nothing, .socket_addrlen=Nothing, .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=Nothing, .socket_flags={. .}, .socket_type=Nothing, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(), socket_so_sndbuf=DEFAULT_SO_SNDBUF, .socket_used_buffer=0, .socket_cur_buffer_cnt=0)' // новый сокет с атрибутами: .socket_status=UNCONNECTED, .socket_address=Nothing, .socket_addrlen=Nothing, .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=Nothing, .socket_flags={. .}, .socket_type=Nothing, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(), socket_so_sndbuf=DEFAULT_SO_SNDBUF, .socket_used_buffer=0, .socket_cur_buffer_cnt=0
         
     if (SOCK_STREAM \isin sock_type) {
-        socket.socket_type := SOCK_STREAM
+        newSocket.socket_type := SOCK_STREAM
     } elif (SOCK_SEQPACKET \isin sock_type) {
-       socket.socket_type := SOCK_SEQPACKET
-    } else { # SOCK_RAW, SOCK_DGRAM
-       socket.socket_type := SOCK_DGRAM
+       newSocket.socket_type := SOCK_SEQPACKET
+    } else {
+       newSocket.socket_type := SOCK_DGRAM
     }
     
-    openfile = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Nothing, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=socket)'    
         
     if (SOCK_NONBLOCK \isin sock_type) {
-        add_to_set(openfile.of_flags, O_NONBLOCK)
+        openfile = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Nothing, .of_ref_cnt=1, ,of_flags={. O_RDWR, O_NONBLOCK .}, .of_private_data=newSocket)' 
+    } else {
+        openfile = 'mk_OpenFile(.of_type=SOCKET_TYPE, .of_file=Nothing, .of_ref_cnt=1, ,of_flags={. O_RDWR .}, .of_private_data=newSocket)' 
     }
     
     if (SOCK_CLOEXEC \isin sock_type) {
@@ -856,59 +860,74 @@ function
         
     return newFD
 end
+    attr summary-cfg: True
+    attr algo-tree: True
 
 
 
 const PATH_MAX : Nat // Maximum path size in system
 
 
+
 logical get_abs_path
 params
-    current @IN  : Process
-    path    @IN  : Text
-    abs     @OUT : Text
+    current  @IN  : Process
+    path     @IN  : Char*
+    path_len @IN  : Nat
+    abs      @OUT : Text
 function
-    if (path(0) == "\0") {
-        return path
+    if (path[0] == "\0") {
+        return to_text(path, path_len)
     }
     
     * Если путь абсолютный, то избавляемся от ., .., символьных ссылок в пути. 
-    * Если путь относительный, добавляем слева current_cur_path и избавляемся от ., .., символьных ссылок в пути 
-    * man path_resolution
+    * Если путь относительный, добавляем слева current.proc_cur_path и избавляемся от ., .. и символьных ссылок в пути 
+    # man path_resolution
+    * Вернуть полученный адрес
 end
+    attr text: 'абсолютный путь файла {path}'
 
 
 
 const AutoBindAlphabet : Char-set // character set [0-9a-f]
 
+function bind is
+/**
+ * @param sockfd  IN файловый дескриптор сокета
+ * @param addr    IN адрес для связывания с сокетом
+ * @param addrlen IN длина адреса
+ * @return 0 в случае успешного выполнения, иначе -1.
+ */
+int bind(int sockfd, sockaddr *addr, socklen_t addrlen);
+end
 
-
-event bind // bind
+event bind // вызов функции bind
 params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Int
-    sockaddr @IN  : sockaddr_un*
+    addr     @IN  : sockaddr_un*
     addrlen  @IN  : Nat
     ret      @OUT : Int
 function    
-    possible_errors = bind_errors(os, current, sockfd, sockaddr, addrlen)    
+    possible_errors = bind_errors(os, current, sockfd, addr, addrlen)    
     
-    sock_address = get_abs_path(current, sockaddr->sun_path)
+    sock_address = get_abs_path(current, addr->sun_path, addrlen)
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
            	return -1
           }
     }
     
     socket = get_sock_data(current, sockfd)
     openfile = get_open_file(current, sockfd)
-    
-    socket.socket_address := sockaddr->sun_path
+
+    socket.socket_address := sock_address
     
     if (addrlen == sizeof('sa_family_t')) { # Autobind feature -- Linux feature
+        // Autobind feature
         forany(newUnixAddress : Text | newUnixAddress \notisin \dom(os.os_socket_table) && \len(newUnixAddress) == 6 && newUnixAddress(0) == '\0' && newUnixAddress(1) \isin AutoBindAlphabet && newUnixAddress(2) \isin AutoBindAlphabet && newUnixAddress(3) \isin AutoBindAlphabet && newUnixAddress(4) \isin AutoBindAlphabet && newUnixAddress(5) \isin AutoBindAlphabet) {
             socket.socket_address := sock_address
             socket.socket_addrlen := 6 # One byte \0 + 5 of autobind address The change to 5 bytes came in Linux 2.3.15.)
@@ -919,19 +938,19 @@ function
     } else {
         if (sock_address(0) != '\0') { # Обычный сокет. Абстрактному сокету это не нужно.
             newFile = 'mk_File(.file_path=sock_address, .file_type=SOCKET_TYPE, .file_cred = { fc_uid, .fc_gid, .fc_permissions = {. S_IRUSR, S_IWUSR, S_IXUSR, S_IRGRP, S_IWGRP, S_IXGRP, S_IROTH, S_IWOTH, S_IXOTH.} \diff current.proc_cred.cr_umask })' // Создание нового файла
-            add_to_list(os.os_files, newFile) // Добавление файла в ФС
+            add_to_list(os.os_files, newFile)
             openfile.of_file := newFile // сокет связывается с созданным файлом
         }
         
-        socket.socket_name := sockaddr->sun_path
+        socket.socket_name := to_text(addr->sun_path, addrlen - sizeof('sa_family_t'))
         socket.socket_addrlen := addrlen
         add_to_map(os.os_socket_table, sock_address, socket) // зафиксировать созданный сокет в системе и его адрес, для последующего нахождения. В Linux это реализует с помощью хэшей
         
         return 0
     }
 end
-
-
+    attr summary-cfg: True
+    attr algo-tree: True
 
 
 
@@ -942,7 +961,7 @@ function listen is
 /**
  * @param sockfd  IN файловый дескриптор.
  * @param backlog IN числовой параметр, определяющий максиманльную длину очереди запросов на подключение.
- * @return код ошибки.
+ * @return 0 в случае успешного выполнения, иначе -1.
  */
 int listen(int sockfd, int backlog);
 end
@@ -1003,62 +1022,70 @@ params
 end
     attr event-desc: Запрос на подключение был принят сервером. (socket \notisin server.socket_queue).
 
-event connect // systemcall connect
+
+function connect is
+/**
+ * @param sockfd  IN файловый дескриптор сокета
+ * @param addr    IN адрес сокета, которому нужно подключиться
+ * @param addrlen IN длина адреса сокета, к которому нужно подключиться 
+ * @return 0 в случае успешного выполнения, иначе -1.
+ */
+int connect(int sockfd, sockaddr *addr, socklen_t addrlen);
+end
+
+
+event connect // вызов функции connect
 params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Int
-    sockaddr @IN  : sockaddr_un-ref
+    addr     @IN  : sockaddr_un*
     addrlen  @IN  : Nat
     ret      @OUT : Int 
-function
+function    
     socket = get_sock_data(current, sockfd)
-    server = get_by_address(os, sockaddr->sun_path)
-    
-    possible_errors = connect_errors(os, current, sockfd, sockaddr, addrlen, server)
+    abs_path = get_abs_path(current, addr->sun_path, addrlen)
+    server = get_by_address(os, abs_path) //! server — сокет, к которому нужно подключиться
+
+    possible_errors = connect_errors(os, current, sockfd, addr, addrlen, server)
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
            	return -1
           }
     }
 
-    #Комментарий из кода -> Фича Linux: If possible we block in connect(2) if the max backlog of the listen socket is been reached. This won't break old apps and it will avoid huge amount of socks hashed (this for unix_gc() performances reasons).
-
     if (socket.socket_type == SOCK_STREAM || socket.socket_type == SOCK_SEQPACKET) {
         socket.socket_status := CONNECTING
+        current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение S.
         
-        current.proc_status := S
-        
-       
-        wait INFWAIT {
-            trigger (is_free_space_in_backlog(server)) { // текст для триггера 1
-                current.proc_status := R
+        wait INFWAIT { // состояние ожидания появления места для постановки в очередь на подключение
+            trigger (is_free_space_in_backlog(server)) { // появления места для постановки в очередь на подключение
+                current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
                 add_to_list(server.socket_queue, socket) 
             }
             
-            trigger (interrupt_logical(current, socket)) { // текст для триггера 2
-                current.proc_errno := EINTR
-                current.proc_status := R
+            trigger (interrupt_logical(current, socket)) { // произошло прерывание во время блокировки системного вызова
+                current.proc_errno := EINTR //! Установить атрибуту proc_errno текущего процесса значение EINTR.
+                current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
                 return -1
             }
         }
         
-        current.proc_status := S
+        current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение S.
         
-        wait INFWAIT {
-            trigger (was_accepted(server, socket)) { // текст для триггера 1
+        wait INFWAIT { // состояние ожидания принятия запроса на подключение сервером
+            trigger (was_accepted(server, socket)) { // принятия запроса на подключение сервером
                 #socket.socket_status := CONNECTED -- устанавливает это сервер (в accept)
                 #socket.socket_peer := -- устанавливает это сервер.
-                del_from_list(server.socket_queue, 0)
-                current.proc_status := R
+                #del_from_list(server.socket_queue, 0) -- делает сервер
+                current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
             }
                 
-            trigger (interrupt_logical(current, socket)) { // текст для триггера 2
-                # Описать подчищивание надо? я про верхний wait. TODO(??)
-                current.proc_errno := EINTR
-                current.proc_status := R
+            trigger (interrupt_logical(current, socket)) { // произошло прерывание во время блокировки системного вызова
+                current.proc_errno := EINTR //! Установить атрибуту proc_errno текущего процесса значение EINTR.
+                current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
                 return -1
             }
         }
@@ -1069,6 +1096,8 @@ function
     
     return 0    
 end
+    attr summary-cfg: True
+    attr algo-tree: True
 
 
 
@@ -1082,44 +1111,57 @@ end
     attr event-desc: Появился запрос на подключение (server.socket_queue != <..>)
 
 
-event accept4 // accept4
+function accept4 is
+/**
+ * @param sockfd  IN файловый дескриптор сокета
+ * @param addr    IN адрес принятного сокета
+ * @param addrlen IN длина принятного сокета 
+ * @param flags   IN флаги SOCK_NONBLOCK, SOCK_CLOEXEC, соединеные через битовое OR
+ * @return файловый дескриптор в случае успешного выполнения, иначе -1.
+ */
+int accept4(int sockfd,sockaddr *addr, socklen_t *addrlen, int flags);
+end
+
+
+event accept4 // вызов функции accept4
 params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    sockaddr @IN  : sockaddr_un-ref
+    sockaddr @IN  : sockaddr_un*
     addrlen  @IN  : Nat*
     flags    @IN  : SockType-set
     ret      @OUT : Int
 function
-    possible_errors = accept_errors(os, current, sockfd, sockaddr, addrlen, flags)
+    possible_errors = accept4_errors(os, current, sockfd, sockaddr, addrlen, flags)
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
            	return -1
           }
     }
 
     socket = get_sock_data(current, sockfd)
     socket.socket_status := LISTENING
-    current.proc_status := S
+    current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение S.
     
-    wait INFWAIT { 
-        trigger (backlog_is_not_empty(socket)) { // текст для триггера 1. Есть кого принимать
-            current.proc_status := R
+    wait INFWAIT { // состояние ожидания после вызова функции accept4
+        trigger (backlog_is_not_empty(socket)) { // появления запроса на подключение
+            current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
             socket.socket_status := LISTEN
-            peer = get_list_head(socket.socket_queue) // Тот, кто подсоединяется
-            newFD = generate_fd(current) // Создаются fd, OpenFile, Socket. Причём все поля у новых OpenFile и Socket такие же, как и у этих же объектов соотвестующих sockfd. 
+            peer = socket.socket_queue(0) // Тот, кто подсоединяется
+            del_from_list(socket.socket_queue)
+            newFD = generate_fd(current) # Создаются fd, OpenFile, Socket. Причём все поля у новых OpenFile и Socket такие же, как и у этих же объектов соотвестующих sockfd. 
             forany(newUnixAddress : Text | newUnixAddress \notisin \dom(os.os_socket_table) && newUnixAddress(0) == '\0') {
-                new_socket = 'mk_socket(.socket_status=CONNECTED, .socket_address=newUnixAddress, .socket_addrlen=\len(newUnixAddress), .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=peer, .socket_flags={. .}, .socket_type=socket.socket_type, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(),  socket_so_sndbuf=socket.socket_so_sndbuf, .socket_used_buffer=0, .socket_cur_buffer_cnt=0)'
+                new_socket = 'mk_socket(.socket_status=CONNECTED, .socket_name=newUnixAddress, .socket_address=newUnixAddress, .socket_addrlen=\len(newUnixAddress), .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=peer, .socket_flags={. .}, .socket_type=socket.socket_type, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(),  socket_so_sndbuf=socket.socket_so_sndbuf, .socket_used_buffer=0, .socket_cur_buffer_cnt=0)'
             
             
                 peer.socket_peer := new_socket
                 peer.socket_status := CONNECTED
                 
-                if (sockaddr != to_sockaddr_ref(NULL)) { //sockaddr != NULL
-                    * strncmp(\ref(\deref(sockaddr).sun_path), \ref(newUnixAddress), min(\len(newUnixAddress, \deref(addrlen)))
+                if (sockaddr != to_sockaddr_pointer(NULL)) { //sockaddr != NULL
+                    memcpy(to_void_pointer(sockaddr->sun_path),  to_void_pointer(to_char_arr(newUnixAddress)), \len(newUnixAddress))
                     \deref(addrlen) := \len(newUnixAddress)      
                 }
 
@@ -1142,9 +1184,9 @@ function
             }
         }
             
-        trigger (interrupt_logical(current, socket)) { // текст для триггера 2
-            current.proc_errno := EINTR
-            current.proc_status := R
+        trigger (interrupt_logical(current, socket)) { // произошло прерывание во время блокировки системного вызова
+            current.proc_errno := EINTR //! Установить атрибуту proc_errno текущего процесса значение EINTR.
+            current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
             socket.socket_status := LISTEN
             
             return -1   
@@ -1153,44 +1195,54 @@ function
 end
 
 
+function accept is
+/**
+ * @param sockfd  IN файловый дескриптор сокета
+ * @param addr    IN адрес принятного сокета
+ * @param addrlen IN длина принятного сокета 
+ * @return файловый дескриптор в случае успешного выполнения, иначе -1.
+ */
+int accept(int sockfd, sockaddr *addr, socklen_t *addrlen);
+end
 
-#On Linux, the new socket returned by accept() does not inherit file status flags such as O_NONBLOCK and O_ASYNC from the listening socket. В POSIX об этом ничего нет.
-event accept // accept
+
+event accept // вызов функции accept
 params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    sockaddr @IN  : sockaddr_un-ref
+    sockaddr @IN  : sockaddr_un*
     addrlen  @IN  : Nat*
     ret      @OUT : Int
 function
-    possible_errors = accept_errors(os, current, sockfd, sockaddr, addrlen, \emptyset)
+    possible_errors = accept_errors(os, current, sockfd, sockaddr, addrlen)
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
            	return -1
           }
     }
 
     socket = get_sock_data(current, sockfd)
     socket.socket_status := LISTENING
-    current.proc_status := S
+    current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение S.
     
-    wait INFWAIT { 
-        trigger (backlog_is_not_empty(socket)) { // текст для триггера 1. Есть кого принимать
-            current.proc_status := R
+    wait INFWAIT { // состояние ожидания после вызова функции accept
+        trigger (backlog_is_not_empty(socket)) { // появления запроса на подключение
+            current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
             socket.socket_status := LISTEN
-            peer = get_list_head(socket.socket_queue) // Тот, кто подсоединяется\
+            peer = socket.socket_queue(0) // Тот, кто подсоединяется
+            del_from_list(socket.socket_queue)
             newFD = generate_fd(current) // Создаются fd, OpenFile, Socket. Причём все поля у новых OpenFile и Socket такие же, как и у этих же объектов соотвестующих sockfd. 
                 forany(newUnixAddress : Text | newUnixAddress \notisin \dom(os.os_socket_table) && newUnixAddress(0) == '\0') {
-                    new_socket = 'mk_socket(.socket_status=CONNECTED, .socket_address=newUnixAddress, .socket_addrlen=\len(newUnixAddress), .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=peer, .socket_flags={. .}, .socket_type=socket.socket_type, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(),  socket_so_sndbuf=socket.socket_so_sndbuf, .socket_used_buffer=0, .socket_cur_buffer_cnt=0)'
+                    new_socket = 'mk_socket(.socket_status=CONNECTED, .socket_name=newUnixAddress, .socket_address=newUnixAddress, .socket_addrlen=\len(newUnixAddress), .socket_queue=mk_empty_list(), .socket_backlog=Nothing, .socket_peer=peer, .socket_flags={. .}, .socket_type=socket.socket_type, .socket_shutdown_flags={. .}, .socket_buf=mk_empty_list(),  socket_so_sndbuf=socket.socket_so_sndbuf, .socket_used_buffer=0, .socket_cur_buffer_cnt=0)'
                 
                     peer.socket_peer := new_socket
                     peer.socket_status := CONNECTED
                     
-                    if (sockaddr != to_sockaddr_ref(NULL)) { //sockaddr != NULL
-                        * strncmp(\ref(\deref(sockaddr).sun_path), \ref(newUnixAddress), min(\len(newUnixAddress, \deref(addrlen)))
+                    if (sockaddr != to_sockaddr_pointer(NULL)) { //sockaddr != NULL
+                        memcpy(to_void_pointer(sockaddr->sun_path),  to_void_pointer(to_char_arr(newUnixAddress)), \len(newUnixAddress))
                         \deref(addrlen) := \len(newUnixAddress)      
                     }
 
@@ -1206,19 +1258,28 @@ function
              
         }
             
-        trigger (interrupt_logical(current, socket)) { // текст для триггера 2
-            current.proc_errno := EINTR
-            current.proc_status := R
+        trigger (interrupt_logical(current, socket)) { // произошло прерывание во время блокировки системного вызова
+            current.proc_errno := EINTR //! Установить атрибуту proc_errno текущего процесса значение EINTR.
+            current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
             socket.socket_status := LISTEN
             
             return -1   
         }
     }
 end
+    attr summary-cfg: True
+    attr algo-tree: True
+
+function close is
+/**
+ * @param fd IN файловый дескриптор
+ * @return 0 в случае успешного выполнения, иначе -1.
+ */
+int close(int fd);
+end
 
 
-
-event close // close (описывался к применнию только для fd сокета)
+event close // вызов функции close
 params
     os       @IN  : OS
     current  @IN  : Process
@@ -1231,7 +1292,7 @@ function
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
            	return -1
           }
     }
@@ -1243,17 +1304,29 @@ function
     open_file.of_ref_cnt--
  
     if (open_file.of_ref_cnt == 0) {
-        socket.socket_peer.socket_status := TCP_CLOSED
+        socket.socket_peer.socket_status := CLOSED
         remove_from_set(os.os_open_file_table, open_file)
         remove_from_map(os.os_socket_table, socket.socket_address)
     }
     
     return 0
 end
+    attr summary-cfg: True
+    attr algo-tree: True
+
+
+function shutdown is
+/**
+ * @param sockfd IN файловый дескриптор сокета
+ * @param how    IN флаг закрытия ввода, вывода, ввода и вывода
+ * @return 0 в случае успешного выполнения, иначе -1.
+ */
+int shutdown(int sockfd, int how);
+end
 
 
 
-event shutdown // shutdown
+event shutdown // вызов функции shutdown
 params
     os       @IN  : OS
     current  @IN  : Process
@@ -1265,7 +1338,7 @@ function
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
            	return -1
           }
     }
@@ -1284,24 +1357,37 @@ function
     
     return 0    
 end
+    attr summary-cfg: True
+    attr algo-tree: True
 
 
+function socketpair is
+/**
+ * @param domain    IN домен
+ * @param sock_type IN тип и флаги сокетов, соединеные через битовое OR
+ * @param protocol  IN протокол домена 
+ * @param sv        IN файловые дескрипторы сокетов 
+ * @return 0 в случае успешного выполнения, иначе -1.
+ */
+int socketpair(int domain, int sock_type, int protocol, int sv[2]);
+end
 
-event socketpair // socketpair
+
+event socketpair // вызов функции socketpair
 params
     os        @IN  : OS
     current   @IN  : Process
     domain    @IN  : AddressFamily
     sock_type @IN  : SockType-set
     protocol  @IN  : Protocol
-    fds       @IN  : Nat -m-> Nat
-    fd        @OUT : Int
+    sv        @IN  : Int*
+    ret       @OUT : Int
 function
-    possible_errors = socketpair_errors(os, current, domain, sock_type, protocol, fds)
+    possible_errors = socketpair_errors(os, current, domain, sock_type, protocol, sv)
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
            	return -1
           }
     }
@@ -1352,135 +1438,135 @@ function
             add_to_map(os.os_socket_table, newUnixAddress1, socket1)
             add_to_map(os.os_socket_table, newUnixAddress2, socket2)
 
-            fds(0) := newFD1
-            fds(1) := newFD2
+            sv[0] := newFD1
+            sv[1] := newFD2
             
             return 0
         }
     }
 end
+    attr summary-cfg: True
+    attr algo-tree: True
 
 ############## IO part start ###########
 
 #TODO
-event getsockopt
-params
-    os      @IN  : OS
-    current @IN  : Process
-    sockfd  @IN  : Nat
-    level   @IN  : Level
-    optname @IN  : SocketFlag
-    optval  @IN  : void*
-    optlen  @IN  : Nat*
-    ret     @OUT : Int
-function
-    if (optname == SO_ACCEPTCONN) {
-    } elif (optname == SO_ATTACH_FILTER) {
-    } elif (optname == SO_ATTACH_BPF) {
-    } elif (optname == SO_ATTACH_REUSEPORT_CBPF) {
-    } elif (optname == SO_ATTACH_REUSEPORT_EBPF) {
-    } elif (optname == SO_BINDTODEVICE) {
-    } elif (optname == SO_BROADCAST) {
-    } elif (optname == SO_BSDCOMPAT) {
-    } elif (optname == SO_DEBUG) {
-    } elif (optname == SO_DETACH_FILTER) {
-    } elif (optname == SO_DETACH_BPF) {
-    } elif (optname == SO_DOMAIN) {
-    } elif (optname == SO_ERROR) {
-    } elif (optname == SO_DONTROUTE) {
-    } elif (optname == SO_INCOMING_CPU) {
-    } elif (optname == SO_KEEPALIVE) {
-    } elif (optname == SO_LINGER) {
-    } elif (optname == SO_LOCK_FILTER) {
-    } elif (optname == SO_MARK) {
-    } elif (optname == SO_OOBINLINE) {
-    } elif (optname == SO_PASSCRED) {
-    } elif (optname == SO_PASSSEC) {
-    } elif (optname == SO_PEEK_OFF) {
-    } elif (optname == SO_PEERCRED) {
-    } elif (optname == SO_PRIORITY) {
-    } elif (optname == SO_PROTOCOL) {
-    } elif (optname == SO_RCVBUF) {
-    } elif (optname == SO_RCVBUFFORCE) {
-    } elif (optname == SO_RCVLOWAT) {
-    } elif (optname == SO_SNDLOWAT) {
-    } elif (optname == SO_RCVTIMEO) {
-    } elif (optname == SO_SNDTIMEO) {
-    } elif (optname == SO_REUSEADDR) {
-    } elif (optname == SO_REUSEPORT) {
-    } elif (optname == SO_RXQ_OVFL) {
-    } elif (optname == SO_SNDBUF) {
-    } elif (optname == SO_SNDBUFFORCE) {
-    } elif (optname == SO_TIMESTAMP) {
-    } elif (optname == SO_TIMESTAMPNS) {
-    } elif (optname == SO_TYPE) {
-    } elif (optname == SO_BUSY_POLL) {
-    } elif (optname == SO_TIMESTAMPING) {
-    }
-    
-    return 0
-end
+#event getsockopt
+#params
+#    os      @IN  : OS
+#    current @IN  : Process
+#    sockfd  @IN  : Nat
+#    level   @IN  : Level
+#    optname @IN  : SocketFlag
+#    optval  @IN  : void*
+#    optlen  @IN  : Nat*
+#    ret     @OUT : Int
+#function
+#    if (optname == SO_ACCEPTCONN) {
+#    } elif (optname == SO_ATTACH_FILTER) {
+#    } elif (optname == SO_ATTACH_BPF) {
+#    } elif (optname == SO_ATTACH_REUSEPORT_CBPF) {
+#    } elif (optname == SO_ATTACH_REUSEPORT_EBPF) {
+#    } elif (optname == SO_BINDTODEVICE) {
+#    } elif (optname == SO_BROADCAST) {
+#    } elif (optname == SO_BSDCOMPAT) {
+#    } elif (optname == SO_DEBUG) {
+#    } elif (optname == SO_DETACH_FILTER) {
+#    } elif (optname == SO_DETACH_BPF) {
+#    } elif (optname == SO_DOMAIN) {
+#    } elif (optname == SO_ERROR) {
+#    } elif (optname == SO_DONTROUTE) {
+#    } elif (optname == SO_INCOMING_CPU) {
+#    } elif (optname == SO_KEEPALIVE) {
+#    } elif (optname == SO_LINGER) {
+#    } elif (optname == SO_LOCK_FILTER) {
+#    } elif (optname == SO_MARK) {
+#    } elif (optname == SO_OOBINLINE) {
+#    } elif (optname == SO_PASSCRED) {
+#    } elif (optname == SO_PASSSEC) {
+#    } elif (optname == SO_PEEK_OFF) {
+#    } elif (optname == SO_PEERCRED) {
+#    } elif (optname == SO_PRIORITY) {
+#    } elif (optname == SO_PROTOCOL) {
+#    } elif (optname == SO_RCVBUF) {
+#    } elif (optname == SO_RCVBUFFORCE) {
+#    } elif (optname == SO_RCVLOWAT) {
+#    } elif (optname == SO_SNDLOWAT) {
+#    } elif (optname == SO_RCVTIMEO) {
+#    } elif (optname == SO_SNDTIMEO) {
+#    } elif (optname == SO_REUSEADDR) {
+#    } elif (optname == SO_REUSEPORT) {
+#    } elif (optname == SO_RXQ_OVFL) {
+#    } elif (optname == SO_SNDBUF) {
+#    } elif (optname == SO_SNDBUFFORCE) {
+#    } elif (optname == SO_TIMESTAMP) {
+#    } elif (optname == SO_TIMESTAMPNS) {
+#    } elif (optname == SO_TYPE) {
+#    } elif (optname == SO_BUSY_POLL) {
+#    } elif (optname == SO_TIMESTAMPING) {
+#    }
+#    
+#    return 0
+#end
 
 
-#TODO
-event setsockopt
-params
-    os      @IN  : OS
-    current @IN  : Process
-    sockfd  @IN  : Nat
-    level   @IN  : Level
-    optname @IN  : SocketFlag
-    optval  @IN  : void*
-    optlen  @IN  : Nat
-    ret     @OUT : Int
-function
-    #if (optname == SO_ACCEPTCONN) - не settable
-    if (optname == SO_ATTACH_FILTER) {
-    } elif (optname == SO_ATTACH_BPF) {
-    } elif (optname == SO_ATTACH_REUSEPORT_CBPF) {
-    } elif (optname == SO_ATTACH_REUSEPORT_EBPF) {
-    } elif (optname == SO_BINDTODEVICE) {
-    } elif (optname == SO_BROADCAST) {
-    } elif (optname == SO_BSDCOMPAT) {
-    } elif (optname == SO_DEBUG) {
-    } elif (optname == SO_DETACH_FILTER) {
-    } elif (optname == SO_DETACH_BPF) {
-    } elif (optname == SO_DOMAIN) {
-    } elif (optname == SO_ERROR) {
-    } elif (optname == SO_DONTROUTE) {
-    } elif (optname == SO_INCOMING_CPU) {
-    } elif (optname == SO_KEEPALIVE) {
-    } elif (optname == SO_LINGER) {
-    } elif (optname == SO_LOCK_FILTER) {
-    } elif (optname == SO_MARK) {
-    } elif (optname == SO_OOBINLINE) {
-    } elif (optname == SO_PASSCRED) {
-    } elif (optname == SO_PASSSEC) {
-    } elif (optname == SO_PEEK_OFF) {
-    } elif (optname == SO_PEERCRED) {
-    } elif (optname == SO_PRIORITY) {
-    } elif (optname == SO_PROTOCOL) {
-    } elif (optname == SO_RCVBUF) {
-    } elif (optname == SO_RCVBUFFORCE) {
-    } elif (optname == SO_RCVLOWAT) {
-    } elif (optname == SO_SNDLOWAT) {
-    } elif (optname == SO_RCVTIMEO) {
-    } elif (optname == SO_SNDTIMEO) {
-    } elif (optname == SO_REUSEADDR) {
-    } elif (optname == SO_REUSEPORT) {
-    } elif (optname == SO_RXQ_OVFL) {
-    } elif (optname == SO_SNDBUF) {
-    } elif (optname == SO_SNDBUFFORCE) {
-    } elif (optname == SO_TIMESTAMP) {
-    } elif (optname == SO_TIMESTAMPNS) {
-    } elif (optname == SO_TYPE) {
-    } elif (optname == SO_BUSY_POLL) {
-    } elif (optname == SO_TIMESTAMPING) {
-    }
-    
-    
-    return 0
-end
+#event setsockopt
+#params
+#    os      @IN  : OS
+#    current @IN  : Process
+#    sockfd  @IN  : Nat
+#    level   @IN  : Level
+#    optname @IN  : SocketFlag
+#    optval  @IN  : void*
+#    optlen  @IN  : Nat
+#    ret     @OUT : Int
+#function
+#    #if (optname == SO_ACCEPTCONN) - не settable
+#    if (optname == SO_ATTACH_FILTER) {
+#    } elif (optname == SO_ATTACH_BPF) {
+#    } elif (optname == SO_ATTACH_REUSEPORT_CBPF) {
+#    } elif (optname == SO_ATTACH_REUSEPORT_EBPF) {
+#    } elif (optname == SO_BINDTODEVICE) {
+#    } elif (optname == SO_BROADCAST) {
+#    } elif (optname == SO_BSDCOMPAT) {
+#    } elif (optname == SO_DEBUG) {
+#    } elif (optname == SO_DETACH_FILTER) {
+#    } elif (optname == SO_DETACH_BPF) {
+#    } elif (optname == SO_DOMAIN) {
+#    } elif (optname == SO_ERROR) {
+#    } elif (optname == SO_DONTROUTE) {
+#    } elif (optname == SO_INCOMING_CPU) {
+#    } elif (optname == SO_KEEPALIVE) {
+#    } elif (optname == SO_LINGER) {
+#    } elif (optname == SO_LOCK_FILTER) {
+#    } elif (optname == SO_MARK) {
+#    } elif (optname == SO_OOBINLINE) {
+#    } elif (optname == SO_PASSCRED) {
+#    } elif (optname == SO_PASSSEC) {
+#    } elif (optname == SO_PEEK_OFF) {
+#    } elif (optname == SO_PEERCRED) {
+#    } elif (optname == SO_PRIORITY) {
+#    } elif (optname == SO_PROTOCOL) {
+#    } elif (optname == SO_RCVBUF) {
+#    } elif (optname == SO_RCVBUFFORCE) {
+#    } elif (optname == SO_RCVLOWAT) {
+#    } elif (optname == SO_SNDLOWAT) {
+#    } elif (optname == SO_RCVTIMEO) {
+#    } elif (optname == SO_SNDTIMEO) {
+#    } elif (optname == SO_REUSEADDR) {
+#    } elif (optname == SO_REUSEPORT) {
+#    } elif (optname == SO_RXQ_OVFL) {
+#    } elif (optname == SO_SNDBUF) {
+#    } elif (optname == SO_SNDBUFFORCE) {
+#    } elif (optname == SO_TIMESTAMP) {
+#    } elif (optname == SO_TIMESTAMPNS) {
+#    } elif (optname == SO_TYPE) {
+#    } elif (optname == SO_BUSY_POLL) {
+#    } elif (optname == SO_TIMESTAMPING) {
+#    }
+#    
+#    return 0
+#end
 
 
 
@@ -1492,7 +1578,7 @@ params
     socket     @IN  : Socket
     res        @OUT : Bool
 end
-    attr event-desc: Прерывание ожидания процесса, из-за прихода сигнала, который не блокируется маской (current.proc_pending_signals != <..> && exists x:Nat | (x \isin current.proc_pending_signals) && (x \notisin curren.proc_blocked_signals)). Если для пришедшего сигнала верно SA_RESTART \isin current.proc_sigaction_array(signum).signal_flags && SO_RCVTIMEO \notisin socket.socket_flags это эквиваленто перезапуску системного вызова т.е. в этом случае res == False, иначе res == True. 
+    attr event-desc: Прерывание ожидания процесса, из-за прихода сигнала, который не блокируется маской (current.proc_pending_signals != <..> && exists x:Nat | (x \isin current.proc_pending_signals) && (x \notisin curren.proc_blocked_signals)). Если для пришедшего сигнала верно SA_RESTART \isin current.proc_signal_flags(signum) && SO_RCVTIMEO \notisin socket.socket_flags это эквиваленто перезапуску системного вызова т.е. в этом случае res == False, иначе res == True. 
 
 
 
@@ -1507,7 +1593,7 @@ end
 
 
 
-event get_msg_len
+logical get_msg_len
 params
     msg @IN  : msghdr*
     res @OUT : Nat
@@ -1515,13 +1601,12 @@ function
     def _res : Nat := 0
 
     for (i in [0..msg.msg_iovlen]) {
-        _res := _res + msg.msg_iov(i).iov_len
+        _res := _res + msg.msg_iov[i].iov_len
     }
     
     return _res
 end
-    attr algorithm: 'Алгоритм, считающий размер данных в msg'
-
+    attr text: 'длина сообщения в {msg}'
 
 
 event load_data
@@ -1530,26 +1615,22 @@ params
     msg     @IN  : msghdr*
     sender  @IN  : Socket
     reciver @IN  : Socket
+    ret     @OUT : Nat
 function
-    def buf : sk_buff := 'mk_skbuff(".buf_data = alloc_ptr(), .data_len = 0, .consumed = 0, buf_control_data = alloc_prt(), control_len = 0", .sender = sender.socket_name)' // Устанавливается адрес отправителя
-    sender.socket_used_buffer := sender.socket_used_buffer + get_msg_len(msg) //(Отмечается изменение использованного пространства буффера данного сокета)
-    sender.socket_cur_buffer_cnt++
+    def buf : sk_buff := 'mk_skbuff(".buf_data = alloc_ptr(), .data_len = 0, .consumed = 0, buf_control_data = alloc_prt(), control_len = 0", .sender = sender.socket_name)'// создаётся загружаемый буффер
+    sender.socket_used_buffer := sender.socket_used_buffer + get_msg_len(msg) // отмечается изменение использованного пространства буффера данного сокета
+    sender.socket_cur_buffer_cnt++ // отмечается изменения количество созданных буфферов
     
     for (i in [0..msg.msg_iovlen]) {
-        // Данные просматриваются последовательно и загружаются подряд
-        memcpy(buf.buf_data + buf.data_len, msg.msg_iov(i).iov_base, msg.msg_iov(i).iov_len) // Описываю будто адрессная арифметика с void* работает 1 байт
-        // Устанавливается общий размер данных (поле data_len)
-        buf.data_len := buf.data_len + msg.msg_iov(i).iov_len
+        memcpy(to_void_pointer(to_char_pointer(buf.buf_data) + buf.data_len), to_void_pointer(to_char_pointer(msg.msg_iov[i].iov_base)), msg.msg_iov[i].iov_len)
+        buf.data_len := buf.data_len + msg.msg_iov[i].iov_len // Увеличивается размер данных в буффере
     }
     
-    if (msg.msg_controllen != 0) {
-        //Если есть дополнительные данные, они загружаются
-        
-        buf.of_arr_len := 0
-        def cmsg : cmsghdr* := CMSG_FIRSTHDR(msghdr)        
-        
+    if (msg.msg_controllen != 0) { // есть дополнительные данные
+        def cmsg : cmsghdr* := CMSG_FIRSTHDR(msghdr)   
+            
         while (cmsg != to_cmsghdr_pointer(NULL)) {
-            if (cmsg->cmsg_type == SCM_RIGHTS) {
+            if (cmsg->cmsg_type == SCM_RIGHTS) { // передаются файловые дескрипторы
                 def fd_arr : Nat* := to_nat_pointer(cmsg->cmsg_data)
                 def fds_cnt : Nat := (cmsg->cmsg_len - sizeof('cmsghdr')) / sizeof('Int') 
             
@@ -1558,7 +1639,6 @@ function
                     fd_open_file = get_open_file(current, cur_fd)
                     fd_open_file.of_ref_cnt++
                     add_to_list(buf.of_arr, fd_open_file)
-                    buf.of_arr_len++
                 }
             } 
             # SCM_CREDENTIALS -> nothing to do
@@ -1567,17 +1647,16 @@ function
             cmsg := CMSG_NXTHDR(msg, cmsg)
         }
         
-        memcpy(buf.buf_control_data, msg.msg_control, msg.msg_controllen) 
-        // Устанавливается размер дополнительных данных  
-        buf.control_len := msg.msg_controllen
-    } else {
-        // Если их нет, то буффер == null
-        buf.buf_control_data := NULL
-        //Устанавливается размер дополнительных данных
-        buf.control_len := 0
+        memcpy(buf.buf_control_data, msg.msg_control, msg.msg_controllen) // Копируются дополнительные данные в буффер
+        buf.control_len := msg.msg_controllen // Устанавливается размер дополнительных данных  
+    } else { // нет дополнительных данных
+        buf.buf_control_data := NULL // В буфере отмечается, что массив дополнительных данных пуст
+        buf.control_len := 0 //Устанавливается размер дополнительных данных
     }
     
     add_to_list(reciver.socket_buf, buf)
+    
+    return buf.data_len
 end
     attr algorithm: 'Алгоритм загрузки данных'
 
@@ -1600,8 +1679,9 @@ params
     msg @IN  : msghdr*
     ret @OUT : cmsghdr*
 function
-    * В принципе понятно. Потом можно их позаменять на непосредственную работу.
+    return to_cmsghdr_pointer(msg->msg_control)
 end
+    attr text: 'первый заголовок дополнительных данных в сообщении {msg}'
 
 
 logical CMSG_NXTHDR
@@ -1610,8 +1690,13 @@ params
     cmsg @IN  : cmsghdr*
     res  @OUT : cmsghdr*
 function
-    * См. CMSG_FIRSTHDR
+    if (to_char_pointer(cmsg) + cmsg->cmsg_len + 1 - CMSG_FIRSTHDR(msg) >= msg->msg_controllen) {
+        return to_cmsghdr_pointer(NULL)
+    }
+
+    return to_cmsghdr_pointer(to_char_pointer(cmsg + cmsg->cmsg_len))
 end
+    attr text: 'следующий заголовок дополнительных данных после {cmsg} в сообщении {msg}'
 
 
 
@@ -1619,16 +1704,14 @@ const SCM_MAX_FD : Nat := 253 // SCM_MAX_FD
 
 type Ucred : struct 
 {
-    Nat pid;
+    Int pid;
     Uid uid;
     Gid gid;
 }
 endtype
 
 
-
-#TODO formalize
-logical verify_cmsgs
+logical cmsgs_errors
 params
     os       @IN  : OS
     current  @IN  : Process
@@ -1637,15 +1720,23 @@ params
     flags    @IN  : MsgFlags
     ret      @OUT : Error-set
 function
-   def errors : Error-set := {. .}
-   def cur_cmsg : cmsghdr* := CMSG_FIRSTHDR(msg)
+    def errors : Error-set := {. .}
+    def cur_cmsg : cmsghdr* := CMSG_FIRSTHDR(msg)
+    def right_cnt := 0
+    def sec_cnt := 0
+    def cred_cnt := 0
     
-   while (cur_cmsg != 'NULL') {
+    while (cur_cmsg != to_cmsghdr_pointer(NULL)) {
         if (cur_cmsg->cmsg_level != SOL_SOCKET) {
-           add_to_set(errors, EINVAL)
+            add_to_set(errors, EINVAL)
         } 
         
         if (cur_cmsg->cmsg_type == SCM_RIGHTS) {
+            right_cnt++
+            if (right_cnt > 1) {
+                add_to_set(errors, EINVAL)
+            }
+        
             def fds_cnt : Nat := (cur_cmsg->cmsg_len - sizeof('cmsghdr')) / sizeof('Int') 
         
             if (fds_cnt > SCM_MAX_FD) {
@@ -1658,17 +1749,28 @@ function
                 add_to_set(errors, EBADF)                
             }
         } elif (cur_cmsg->cmsg_type == SCM_CREDENTIALS) {
-              ucred = to_ucred_pointer(cur_cmsg->cmsg_data)
-              
-              if ((forall proc : Process | proc.proc_pid != ucred->pid) || ucred->uid \notisin os.os_users || ucred->gid \notisin os.os_groups) {
+            cred_cnt++
+
+            if (cred_cnt > 1) {
                 add_to_set(errors, EINVAL)
-              }
-            
-              if (current.proc_cred.cr_euid != 0 && (ucred->pid != current.proc_pid || (ucred->uid != current.proc_cred.cr_uid && ucred->uid != current.proc_cred.cr_euid && ucred->uid != current.proc_cred.cr_suid) || (ucred->gid != current.proc_cred.cr_gid && ucred->gid != current.proc_cred.cr_egid && ucred->gid != current.proc_cred.cr_sgid))) {
-                add_to_set(errors, EACCES) # из кода
-              }
+            }
+
+            ucred = to_ucred_pointer(cur_cmsg->cmsg_data)
+
+            if ((forall proc : Process | proc.proc_pid != ucred->pid) || ucred->uid \notisin os.os_users || ucred->gid \notisin os.os_groups) {
+                add_to_set(errors, EINVAL)
+            }
+
+            if (current.proc_cred.cr_euid != 0 && (ucred->pid != current.proc_pid || (ucred->uid != current.proc_cred.cr_uid && ucred->uid != current.proc_cred.cr_euid && ucred->uid != current.proc_cred.cr_suid) || (ucred->gid != current.proc_cred.cr_gid && ucred->gid != current.proc_cred.cr_egid && ucred->gid != current.proc_cred.cr_sgid))) {
+                add_to_set(errors, EACCES)
+            }
         } elif (cur_cmsg->cmsg_type == SCM_SECURITY) {
-            #TODO
+            sec_cnt++
+            if (sec_cnt > 1) {
+                add_to_set(errors, EINVAL)
+            }
+
+            #TODO(?) or empty
         } else {
             add_to_set(errors, EINVAL)
         }
@@ -1678,6 +1780,7 @@ function
     
    return errors
 end
+
 
 
 
@@ -1693,59 +1796,46 @@ function
     # at least one ordinary data byte 
 
     socket = get_sock_data(current, sockfd)
+    abs_addr = get_abs_path(current, msg->msg_name, msg->msg_namelen)
     
     if (socket.socket_type == SOCK_DGRAM) {
-        other = get_by_address(os, msg->msg_name)
+        other = get_by_address(os, abs_addr)
     } else {
         other = socket.socket_peer
     }
 
-    current.proc_status := S
-    wait INFWAIT {
-        trigger (is_possible_to_load_data(socket, other)) {//сообщение для тригерра 1
-            current.proc_status := R
-            load_data(current, msg, socket, other)
+    current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение S.
+    wait INFWAIT { // состояние ожидания после вызова функции отправки данных по сокету
+        trigger (is_possible_to_load_data(socket, other)) { // произошло освобождение места в буффере отправителя
+            current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
+            size_of_loaded_data = load_data(current, msg, socket, other)
+            socket.socket_peer := other
+            return size_of_loaded_data
         }
             
-        trigger (interrupt_logical(current, socket)) { // сообщение для триггера 2
-            current.proc_status := R
-            current.proc_errno := EINTR
+        trigger (interrupt_logical(current, socket)) { // произошло прерывание во время блокировки системного вызова
+            current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
+            current.proc_errno := EINTR //! Установить атрибуту proc_errno текущего процесса значение EINTR.
             return -1   
         }
     }
-    
-    
-    socket.socket_peer := other
-    return 0
 end
 
 
 const SIGPIPE : Nat // SIGPIPE
 
+function sendmsg is
+/**
+ * @param sockfd IN файловый дескриптор сокета
+ * @param msg    IN ссылка на структуру msghdr для передачи
+ * @param flags  IN флаги сообщения
+ * @return количество отправленных байт в случае успешного выполнения, иначе -1.
+ */
+ssize_t sendmsg(int sockfd, msghdr *msg, int flags);
+end
 
-#If a blocked call to one of the following interfaces is
-#interrupted by a signal handler, then the call is automatically
-#restarted after the signal handler returns if the SA_RESTART flag
-#was used; otherwise the call fails with the error EINTR:
 
-#read, write, Socket interfaces: accept(2), connect(2), recv(2), recvfrom(2),
-#recvmmsg(2), recvmsg(2), send(2), sendto(2), and sendmsg(2),
-#unless a timeout has been set on the socket (see below).
-
-#The following interfaces are never restarted after being
-#interrupted by a signal handler, regardless of the use of
-#SA_RESTART; they always fail with the error EINTR when
-#interrupted by a signal handler:
-
-#* "Input" socket interfaces, when a timeout (SO_RCVTIMEO) has
-#been set on the socket using setsockopt(2): accept(2), recv(2),
-#recvfrom(2), recvmmsg(2) (also with a non-NULL timeout
-#argument), and recvmsg(2).
-
-#"Output" socket interfaces, when a timeout (SO_RCVTIMEO) has
-#been set on the socket using setsockopt(2): connect(2),
-#send(2), sendto(2), and sendmsg(2).
-event sendmsg
+event sendmsg // вызов функции sendmsg
 params
     os       @IN  : OS
     current  @IN  : Process
@@ -1762,7 +1852,7 @@ function
         }
     
         forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
             return -1
         }
     }
@@ -1770,7 +1860,23 @@ function
     sendmsg_generic(os, current, sockfd, msg, flags)
 end
 
-event sendto //sendto
+
+function sendto is
+/**
+ * @param sockfd    IN файловый дескриптор сокета
+ * @param buf       IN буффер с собщением
+ * @param len       IN размера буфера
+ * @param flags     IN флаги сообщения
+ * @param dest_addr IN адрес получателя
+ * @param addrlen   IN размер адреса получателя
+ * @return количество отправленных байт в случае успешного выполнения, иначе -1.
+ */
+ssize_t sendto(int sockfd, void *buf, size_t len, int flags, sockaddr *dest_addr, socklen_t addrlen);
+end
+
+
+
+event sendto // вызов функции sendto
 params
     os       @IN  : OS
     current  @IN  : Process
@@ -1789,8 +1895,12 @@ function
     possible_errors = sendmsg_errors(os, current, sockfd, \ref(msg), flags)
     
     if (possible_errors != {. .}) {
+        if (EPIPE \isin possible_errors && MSG_NOSIGNAL \notisin flags) {
+            add_to_list(current.proc_pending_signals, SIGPIPE)
+        }
+    
         forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
             return -1
         }
     }
@@ -1799,8 +1909,19 @@ function
 end
 
 
+function send is
+/**
+ * @param sockfd IN файловый дескриптор сокета
+ * @param buf    IN буффер с собщением
+ * @param len    IN размера буфера
+ * @param flags  IN флаги сообщения
+ * @return количество отправленных байт в случае успешного выполнения, иначе -1.
+ */
+ssize_t send(int sockfd, const void *buf, size_t len, int flags);
+end
 
-event send // send
+
+event send // вызов функции send
 params
     os       @IN  : OS
     current  @IN  : Process
@@ -1817,8 +1938,12 @@ function
     possible_errors = sendmsg_errors(os, current, sockfd, \ref(msg), flags)
     
     if (possible_errors != {. .}) {
+        if (EPIPE \isin possible_errors && MSG_NOSIGNAL \notisin flags) {
+            add_to_list(current.proc_pending_signals, SIGPIPE)
+        }
+    
         forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
             return -1
         }
     }
@@ -1827,31 +1952,44 @@ function
 end
 
 
+function write is
+/**
+ * @param fd IN файловый дескриптор сокета
+ * @param buf    IN буффер с собщением
+ * @param count  IN размера буфера
+ * @return количество отправленных байт в случае успешного выполнения, иначе -1.
+ */
+ssize_t write(int fd, const void *buf, size_t count);
+end
 
-event write // write
+
+
+event write // // вызов функции write
 params
     os      @IN  : OS
     current @IN  : Process
-    sockfd  @IN  : Nat
+    sockfd  @IN  : Int
     buf     @IN  : void* # void *buf
     count   @IN  : Nat
     ret     @OUT : Int
+invariant current.proc_fds(sockfd).fd_open_file_ref->of_type == SOCKET_TYPE
 function
     socket123 = get_sock_data(current, sockfd) # Там потом имя с socket из sendmsg_generic накладывается
     
-    msg = 'mk_msg(msg_name = socket123.socket_peer.socket_address, msg_name_len = socket123.socket_peer.socket_address_len, ioveclist = &{buf, count}, msg_control = 0, msg_controllen = 0, msg_flags = 0)'
+    msg = 'mk_msg(msg_name = socket123.socket_peer.socket_address, msg_name_len = socket123.socket_peer.socket_address_len, .msg_iov = &{buf, count}, msg_control = 0, msg_controllen = 0, msg_flags = 0)'
     
     possible_errors = sendmsg_errors(os, current, sockfd, \ref(msg), \emptyset)
     
     if (possible_errors != {. .}) {
         forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
             return -1
         }
     }
     
     sendmsg_generic(os, current, sockfd, \ref(msg), \emptyset)
 end
+
 
 #seqpacket в io ~ dgram
 event min
@@ -1886,25 +2024,20 @@ end
 
 event memcpy
 params
-    T    @TYPE
+    T   @TYPE
     dest @IN   : T*
     src  @IN   : T*
     n    @IN   : Nat
 function
-    * Скопировать n байт из адреса src в адрес dest.
-end
-    attr algorithm: 'Алгоритм реализующий функцию memcpy из библиотеки СИ, но без возвращаемого результата'
-
-
-logical generate_fd
-params
-    current @IN  : Process
-    fd      @OUT : Nat
-function
-    forany(newFD : Nat | newFD \notisin \dom(current.proc_fds) && forall nn : Nat | (nn < newFD) => nn \isin \dom(current.proc_fds)) {
-        return newFD
+    dest_char = to_char_pointer(dest)
+    src_char = to_char_pointer(src)
+    
+    for (i in [0..n]) {
+        dest_char[i] := src_char[i]
     }
+    #* Скопировать n байт из адреса src в адрес dest.
 end
+    attr algorithm: 'Алгоритм реализующий функцию memcpy из библиотеки СИ'
 
 
 
@@ -1947,14 +2080,14 @@ function
                     cmsg_copied := cmsg_copied + sizeof('Int')
                 }
             }        
-        } elif ('cmsg->cmsg_type == SCM_CREDENTIALS && SO_PASSCRED \isin reciver.socket_flags') {
+        } elif (cmsg->cmsg_type == SCM_CREDENTIALS && SO_PASSCRED \isin reciver.socket_flags) {
             if (cmsg->cmsg_len > msg->msg_controllen - cmsg_copied) {
                 add_to_set(msg->msg_flags, MSG_CTRUNC)
             } else {
                 memcpy(to_void_pointer(to_char_pointer(msg->msg_control) + cmsg_copied), to_void_pointer(cmsg), cmsg->cmsg_len)
                 cmsg_copied := cmsg_copied + cmsg->cmsg_len
             }            
-        } elif ('cmsg->cmsg_type == SCM_SECURITY && SO_PASSSEC \isin reciver.socket_flags') {
+        } elif (cmsg->cmsg_type == SCM_SECURITY && SO_PASSSEC \isin reciver.socket_flags) {
             if (cmsg->cmsg_len > msg->msg_controllen - cmsg_copied) {
                 add_to_set(msg->msg_flags, MSG_CTRUNC)
             } else {
@@ -1987,10 +2120,10 @@ function
 
     if (reciver.socket_type == SOCK_DGRAM || reciver.socket_type == SOCK_SEQPACKET) {       
         buf = reciver.socket_buf(0) // Первая пришедшая датаграмма
-        sender = get_by_address(os, buf.sender) // Отправитель
+        def sender : Socket := get_by_address(os, buf.sender) // Отправитель
 
-        while ('i < msg->msg_iovlen && buf.consumed < buf.data_len') { #TODO while с двумя условиями
-            iov := msg->msg_iov(i)
+        while (i < msg->msg_iovlen && buf.consumed < buf.data_len) {
+            iov := msg->msg_iov[i]
             cur_dgram_copied = min(iov.iov_len, buf.data_len - buf.consumed)
             
             memcpy(iov.iov_base, buf.buf_data + buf.consumed, cur_dgram_copied)
@@ -2018,12 +2151,12 @@ function
         if (MSG_PEEK \notisin flags) {
             sender.socket_used_buffer := sender.socket_used_buffer - buf.data_len // Освобождается память в буффере отправителя для последующих сообщений.
             sender.socket_cur_buffer_cnt-- 
-            del_from_list(reciver.socket_buf, 0) // Прочитанная датаграмма удаляется.
+            del_from_list(reciver.socket_buf) // Прочитанная датаграмма удаляется.
         } else {
             buf.consumed := buf.consumed - copied
         }
         
-        if ('reciver.socket_type == SOCK_DGRAM && MSG_TRUNC \isin flags') {
+        if (reciver.socket_type == SOCK_DGRAM && MSG_TRUNC \isin flags) {
             return buf.data_len // return real dgram size
         } else {
             return copied
@@ -2032,13 +2165,13 @@ function
         def cur_iov_base_size : Nat := 0 # cur_len of current iov
         def cur_buf_to_read : Nat := 0
         
-        while ('i < msg->msg_iovlen && cur_buf_to_read < \len(socket.socket_buf)') {
+        while (i < msg->msg_iovlen && cur_buf_to_read < \len(reciver.socket_buf)) {
             buf = reciver.socket_buf(cur_buf_to_read)
             
             def cur_stream_copied : Nat := 0
             # copy one socket buff
-            while ('i < msg->msg_iovlen && buf.consumed < buf.data_len') {
-                iov := msg->msg_iov(i)
+            while (i < msg->msg_iovlen && buf.consumed < buf.data_len) {
+                iov := msg->msg_iov[i]
             
                 bytes_to_copy = min(iov.iov_len - cur_iov_base_size, buf.data_len - buf.consumed)
                 
@@ -2077,7 +2210,7 @@ endRead:
                 other = get_by_address(os, buf.sender)
                 other.socket_used_buffer := other.socket_used_buffer - buf.data_len
                 other.socket_cur_buffer_cnt--
-                del_from_list(socket_buf, 0)
+                del_from_list(socket_buf)
             }
         }
         
@@ -2100,21 +2233,21 @@ end
 
 action recvmsg_generic
 params
-    os          @IN  : OS
-    current     @IN  : Process
-    sockfd      @IN  : Nat
-    msg         @IN  : msghdr*
-    flags       @IN  : MsgFlags
-    paddrlen    @IN  : Nat*
+    os          @IN : OS
+    current     @IN : Process
+    sockfd      @IN : Nat
+    msg         @IN : msghdr*
+    flags       @IN : MsgFlags
+    paddrlen    @IN : Nat*
 function
     socket = get_sock_data(current, sockfd)
     
-    current.proc_status := S
-    wait INFWAIT {
-        trigger (msg_have_come(socket)) { // Описание триггера 1
-            current.proc_status := R
+    current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение S.
+    wait INFWAIT { // состояние ожидания после вызова функции получения данных из сокета
+        trigger (msg_have_come(socket)) { // появилось сообщения для считывания в буффере
+            current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
             
-            if (msg->msg_name == 'NULL' && paddrlen == to_nat_pointer(NULL)) {
+            if (msg->msg_name == to_char_pointer(NULL) && paddrlen == to_nat_pointer(NULL)) {
                 res = get_data(os, current, socket, msg, flags)
                 # msg_namelen ссылкается на поданный буффер, так что заполняя его, сразу заполняем ответ. 
                 \deref(paddrlen) := msg.msg_namelen # с длинной адресса не так
@@ -2126,19 +2259,27 @@ function
             return res
         }
         
-        trigger (interrupt_logical(current, socket)) { // Описание триггера для прерываний
-            current.proc_errno := EINTR
-            current.proc_status := R
+        trigger (interrupt_logical(current, socket)) { // произошло прерывание во время блокировки системного вызова
+            current.proc_errno := EINTR //! Установить атрибуту proc_errno текущего процесса значение EINTR.
+            current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
             return -1   
         }
     }
 end
 
 
+function recvmsg is
+/**
+ * @param sockfd IN файловый дескриптор сокета
+ * @param msg    IN ссылка на структуру msghdr для приёма
+ * @param flags  IN флаги сообщения
+ * @return количество считанных байт в случае успешного выполнения, иначе -1.
+ */
+ssize_t recvmsg(int sockfd, msghdr *msg, int flags);
+end
 
 
-
-event recvmsg //recvmsg
+event recvmsg // вызов функции recvmsg
 params
     os       @IN  : OS
     current  @IN  : Process
@@ -2151,7 +2292,7 @@ function
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
            	return -1
           }
     }
@@ -2160,7 +2301,21 @@ function
 end
 
 
-event recvfrom //recvfrom
+function recvfrom is
+/**
+ * @param sockfd   IN файловый дескриптор сокета
+ * @param buf      IN буффер для приёма собщения
+ * @param len      IN размера буфера
+ * @param flags    IN флаги сообщения
+ * @param src_addr IN адрес, который нужно заполнить отправителем
+ * @param addrlen  IN размер отправителя
+ * @return количество считанных байт в случае успешного выполнения, иначе -1.
+ */
+ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags, sockaddr *src_addr, socklen_t *addrlen);
+end
+
+
+event recvfrom // вызов функции recvfrom 
 params
     os       @IN  : OS
     current  @IN  : Process
@@ -2178,7 +2333,7 @@ function
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
            	return -1
           }
     }
@@ -2187,7 +2342,19 @@ function
 end
 
 
-event recv // recv
+function recv is
+/**
+ * @param sockfd IN файловый дескриптор сокета
+ * @param buf    IN буффер для приёма сообщения
+ * @param len    IN размера буфера
+ * @param flags  IN флаги сообщения
+ * @return количество считанных байт в случае успешного выполнения, иначе -1.
+ */
+ssize_t recv(int sockfd, void *buf, size_t len, int flags);
+end
+
+
+event recv // вызов функции recv
 params
     os       @IN  : OS
     current  @IN  : Process
@@ -2205,7 +2372,7 @@ function
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
            	return -1
           }
     }
@@ -2214,8 +2381,18 @@ function
 end
 
 
+function read is
+/**
+ * @param fd     IN файловый дескриптор сокета
+ * @param buf    IN буффер для приёма собщения
+ * @param count  IN размера буфера
+ * @return количество считанных байт в случае успешного выполнения, иначе -1.
+ */
+ssize_t read(int fd, void *buf, size_t count);
+end
 
-event read // read
+
+event read // вызов функции read
 params
     os      @IN  : OS
     current @IN  : Process
@@ -2223,6 +2400,7 @@ params
     buf     @IN  : void*
     count   @IN  : Nat  
     ret     @OUT : Int
+invariant current.proc_fds(sockfd).fd_open_file_ref->of_type == SOCKET_TYPE
 function
     socket123 = get_sock_data(current, sockfd)
     
@@ -2232,15 +2410,13 @@ function
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
            	return -1
           }
     }
     
     recvmsg_generic(os, current, sockfd, msg, \emptyset, to_nat_pointer(NULL))
 end
-
-
 
 
 action truncate_address // Заполнить всю структуру нулями. 
@@ -2250,11 +2426,18 @@ function
     * Заполнить всю структуру нулями.
 end
 
+function getpeername is
+/**
+ * @param sockfd  IN файловый дескриптор сокета
+ * @param addr    IN ссылка на адрес, который нужно заполнить
+ * @param addrlen IN размер адреса
+ * @return 0 в случае успешного выполнения, иначе -1.
+ */
+int getpeername(int sockfd, sockaddr *addr, socklen_t *addrlen);
+end
 
 
-
-
-event getpeername
+event getpeername // вызов функции getpeername
 params
     os      @IN  : OS
     current @IN  : Process
@@ -2267,16 +2450,16 @@ function
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
            	return -1
           }
     }
 
     socket = get_sock_data(current, sockfd)
 
-    if (\deref(addrlen) > socket.socket_addrlen) {
+    if (\deref(addrlen) >= socket.socket_peer.socket_addrlen) {
         address->sun_family := AF_UNIX
-        address->sun_path := socket.socket_peer.socket_name
+        address->sun_path := to_char_arr(socket.socket_peer.socket_name)
     } else { # Buffer is too small
         truncate_address(address) # Truncate address
     }
@@ -2285,10 +2468,22 @@ function
     
     return 0
 end
+    attr summary-cfg: True
+    attr algo-tree: True
 
 
+function getsockname is
+/**
+ * @param sockfd  IN файловый дескриптор сокета
+ * @param addr    IN ссылка на адрес, который нужно заполнить
+ * @param addrlen IN размер адреса
+ * @return 0 в случае успешного выполнения, иначе -1.
+ */
+int getsockname(int sockfd, sockaddr *addr, socklen_t *addrlen);
+end
 
-event getsockname
+
+event getsockname // вызов функции getsockname
 params
     os      @IN  : OS
     current @IN  : Process
@@ -2301,7 +2496,7 @@ function
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
-  	        current.proc_errno := error
+  	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
            	return -1
           }
     }
@@ -2310,7 +2505,7 @@ function
 
     if (\deref(addrlen) > socket_addrlen) {
         address->sun_family := AF_UNIX
-        address->sun_path := socket.socket_name
+        address->sun_path := to_char_arr(socket.socket_name)
     } else { // Buffer is too small
         truncate_address(address) 
     }
@@ -2319,6 +2514,8 @@ function
     
     return 0
 end
+    attr summary-cfg: True
+    attr algo-tree: True
 
 
 
@@ -2335,7 +2532,6 @@ params
   res  @OUT: Nat
 end
   attr text: Количество элементов в множестве {setP}
-
 
 
 logical socket_errors // сокращение для получения множество вохможноых ошибок, при заданных входных данных для системного вызова socket.
@@ -2358,6 +2554,7 @@ function
     (errcode == ENOMEM) && False ||  # Не знаю как, поэтому не специфицирую 
     (errcode == ESOCKTNOSUPPORT) && (sock_type \intersect {. SOCK_STREAM .} == {. .} || sock_type \intersect {. SOCK_DGRAM .} == {. .} && sock_type \intersect {. SOCK_SEQPACKET .} == {. .}) .}
 end
+    attr text: 'множество ошибок, которые должны произойти при вызове функции socket с параметрами {domain}, {sock_type}, {protocol}'
 
 
 
@@ -2373,7 +2570,7 @@ function
     socket = get_sock_data(current, sockfd)
     openfile = get_open_file(current, sockfd)
     
-    abs_path = get_abs_path(current, sockaddr->sun_path)
+    abs_path = get_abs_path(current, sockaddr->sun_path, addrlen)
     
     return {. errcode for errcode : Error | (errcode == EACCES) && (abs_path(0) != "\0" && !access_to_write(os, current, abs_path)) ||
         (errcode == EADDRINUSE) && (abs_path \isin \dom(os.os_socket_table)) || 
@@ -2389,6 +2586,7 @@ function
         (errcode == ENOTDIR) && (!is_all_files_in_path_dirs(os, current, abs_path)) || 
         (errcode == EROFS) && (False) .}
 end
+    attr text: 'множество ошибок, которые должны произойти при вызове функции bind с параметрами {sockfd}, {sockaddr}, {addrlen}'
 
 
 logical listen_errors
@@ -2417,7 +2615,7 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Int
-    sockaddr @IN  : sockaddr_un-ref
+    sockaddr @IN  : sockaddr_un*
     addrlen  @IN  : Nat
     server   @IN  : Socket
     ret      @OUT : Error-set
@@ -2440,10 +2638,8 @@ function
         (errcode == EPROTOTYPE) && (socket.socket_type != server.socket_type) || 
         (errcode == ETIMEDOUT) && (False) .}
 end
+    attr text: 'множество ошибок, которые должны произойти при вызове функции connect с параметрами {sockfd}, {sockaddr}, {addrlen}'
 
-
-# TODO
-#The receive queue is logically terminated if an end-of-file indication has been received or a connection has been terminated. A segment shall be considered to be terminated if another segment follows it in the queue, if the segment completes a record, or if an end-of-file or other connection termination has been reported. The last segment in the receive queue shall also be considered to be terminated while the socket has a pending error to be reported.
 
 
 logical accept_errors
@@ -2451,7 +2647,39 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    sockaddr @IN  : sockaddr_un-ref
+    sockaddr @IN  : sockaddr_un*
+    addrlen  @IN  : Nat*
+    ret      @OUT : Error-set    
+function
+#If address is not a null pointer, the address of the peer for the accepted connection shall be stored in the sockaddr structure pointed to by address, and the length of #this address shall be stored in the object pointed to by address_len.
+
+#If the actual length of the address is greater than the length of the supplied sockaddr structure, the stored address shall be truncated.
+    socket = get_sock_data(current, sockfd)
+    openfile = get_open_file(current, sockfd)
+    
+    return {. errcode for errcode : Error | (errcode == EAGAIN) && (O_NONBLOCK \isin openfile.of_flags && socket.socket_queue == <..>) || 
+        (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
+        (errcode == ECONNABORTED) && (False) || 
+        (errcode == EFAULT) && (False) ||
+        (errcode == EINVAL) && (\deref(addrlen) != sizeof('sockaddr_un') || socket.socket_status != LISTEN || RCV_SHUTDOWN \isin socket.socket_shutdown_flags) || 
+        (errcode == EMFILE) && (set_len(\dom(current.proc_fds)) == MAX_FDS_PER_PROC) ||
+        (errcode == ENFILE) && (set_len(os.os_open_file_table) == MAX_OPEN_FILES) ||
+        (errcode == ENOBUFS) && (False) || 
+        (errcode == ENOMEM) && (False) || 
+        (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) || 
+        (errcode == EOPNOTSUPP) && (socket.socket_type != SOCK_STREAM && socket.socket_type != SOCK_SEQPACKET) || 
+        (errcode == EPROTO) && (False) .}
+end
+    attr text: 'множество ошибок, которые должны произойти при вызове функции connect с параметрами {sockfd}, {sockaddr}, {addrlen}'
+
+
+
+logical accept4_errors
+params
+    os       @IN  : OS
+    current  @IN  : Process
+    sockfd   @IN  : Nat
+    sockaddr @IN  : sockaddr_un*
     addrlen  @IN  : Nat*
     flags    @IN  : SockType-set
     ret      @OUT : Error-set    
@@ -2475,7 +2703,7 @@ function
         (errcode == EOPNOTSUPP) && (socket.socket_type != SOCK_STREAM && socket.socket_type != SOCK_SEQPACKET) || 
         (errcode == EPROTO) && (False) .}
 end
-
+    attr text: 'множество ошибок, которые должны произойти при вызове функции accept4 с параметрами {sockfd}, {sockaddr}, {addrlen}, {flags}'
 
 
 logical close_errors
@@ -2491,7 +2719,7 @@ function
         (errcode == ENOSPC) && (False) || 
         (errcode == EDQUOT) && (False).}
 end
-
+    attr text: 'множество ошибок, которые должны произойти при вызове функции close с параметрами {fd}'
 
 
 logical shutdown_errors
@@ -2510,7 +2738,7 @@ function
         (errcode == ENOTCONN) && (socket.socket_status != CONNECTED) || 
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) .}
 end
-
+    attr text: 'множество ошибок, которые должны произойти при вызове функции shutdown с параметрами {sockfd}, {how}'
 
 
 logical socketpair_errors
@@ -2520,7 +2748,7 @@ params
     domain    @IN  : AddressFamily
     sock_type @IN  : SockType-set
     protocol  @IN  : Protocol
-    fds       @IN  : Nat -m-> Nat
+    fds       @IN  : Int*
     ret      @OUT : Error-set
 function    
     return {. errcode for errcode : Error | (errcode == EAFNOSUPPORT) && (domain != AF_UNIX) || 
@@ -2530,6 +2758,7 @@ function
         (errcode == EOPNOTSUPP) && (protocol != PF_UNIX && protocol != PF_UNSPEC) || 
         (errcode == EPROTONOSUPPORT) && (protocol != PF_UNIX && protocol != PF_UNSPEC) .}
 end
+    attr text: 'множество ошибок, которые должны произойти при вызове функции socketpair с параметрами {domain}, {sock_type}, {protocol}, {fds}'
 
 
 logical getpeername_errors
@@ -2551,7 +2780,7 @@ function
         (errcode == ENOTCONN) && (socket.socket_status != CONNECTED) || 
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) .}
 end
-
+    attr text: 'множество ошибок, которые должны произойти при вызове функции getpeername с параметрами {sockfd}, {address}, {addrlen}'
 
 
 logical getsockname_errors
@@ -2571,7 +2800,7 @@ function
         (errcode == ENOBUFS) && (False) || 
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) .}
 end
-
+    attr text: 'множество ошибок, которые должны произойти при вызове функции getsockname с параметрами {sockfd}, {address}, {addrlen}'
 
 
 logical recvmsg_errors
@@ -2590,25 +2819,24 @@ function
         sender_path = socket.socket_peer.socket_address
         sender = socket.socket_peer
     } else {
-        sender_path = get_abs_path(current, msg->msg_name)
+        sender_path = get_abs_path(current, msg->msg_name, msg->msg_namelen)
         sender = get_by_address(os, sender_path)
     }
 
     
     # ENOTSOCK last in recvmsg
-    # нужно проверить что после wait всё открыто всё доступно
     return {. errcode for errcode : Error | (errcode == EAGAIN) && ((O_NONBLOCK \isin openfile.of_flags || MSG_DONTWAIT \isin flags) && socket.socket_buf == <. .>) || 
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
         (errcode == ECONNREFUSED) && (socket.socket_addrlen == 0) || 
         (errcode == EFAULT) && (False) || 
-        (errcode == EINVAL) && (MSG_OOB \isin MsgFlags) || 
+        (errcode == EINVAL) && (MSG_OOB \isin MsgFlags || msg->msg_controllen > MAX_ANCILLARY_BUFFER) || 
         (errcode == ENOMEM) && (False) || 
         (errcode == ENOTCONN) && ((socket.socket_type == SOCK_STREAM || socket.socket_type == SOCK_SEQPACKET) && socket.socket_status != CONNECTED) || 
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) || 
         (errcode == ENOTCONN) && (msg->msg_namelen == 0 && socket.socket_status != CONNECTED) ||
         (errcode == EPROTOTYPE) && (socket.socket_type != sender.socket_type) .}
 end
-
+    attr text: 'множество ошибок, которые должны произойти при чтении из сокета с параметрами {sockfd}, {msg}, {flags}'
 
 
 logical sendmsg_errors
@@ -2627,7 +2855,7 @@ function
         reciver_path = socket.socket_peer.socket_address
         reciver = socket.socket_peer
     } else {
-        reciver_path = get_abs_path(current, msg->msg_name)
+        reciver_path = get_abs_path(current, msg->msg_name, msg->msg_namelen)
         reciver = get_by_address(os, reciver_path)
     }
 
@@ -2638,8 +2866,8 @@ function
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
         (errcode == EDESTADDRREQ) && ((msg->msg_namelen == 0 && socket.socket_status == CONNECTED) || (msg.msg_namelen != 0 && reciver_path \notisin \dom(os.os_socket_table))) || 
         (errcode == EFAULT) && (False) ||  
-        (errcode == EINVAL) && (MSG_OOB \isin flags) ||  
-        (errcode == EISCONN) && (msg.msg_namelen != 0 && socket.socket_type == SOCK_STREAM && socket.socket_status == CONNECTED) ||  
+        (errcode == EINVAL) && (MSG_OOB \isin flags || msg->msg_controllen > MAX_ANCILLARY_BUFFER) ||  
+        (errcode == EISCONN) && (msg->msg_namelen != 0 && (socket.socket_type == SOCK_STREAM || socket.socket_type == SOCK_SEQPACKET) && socket.socket_status == CONNECTED) ||  
         (errcode == EMSGSIZE) && (get_msg_len(msg) > socket.socket_so_sndbuf) ||  
         (errcode == ENOBUFS) && (False) ||  
         (errcode == ENOMEM) && (False) ||  
@@ -2650,11 +2878,11 @@ function
         (errcode == ENOTCONN) && (msg.msg_namelen == 0 && socket.socket_status != CONNECTED) ||
         (errcode == EPROTOTYPE) && (socket.socket_type != reciver.socket_type) .}
     
-    res2 = verify_cmsgs(os, current, sockfd, msg, flags) # ESRCH, EPERM, EINVAL
+    res2 = cmsgs_errors(os, current, sockfd, msg, flags) # ESRCH, EPERM, EINVAL
     
     return res1 \union res2
 end
-
+    attr text: 'множество ошибок, которые должны произойти при записи в сокет с параметрами {sockfd}, {msg}, {flags}'
 
 
 event get_files_in_path
@@ -2699,7 +2927,6 @@ end
     attr algorithm: 'Алгоритм выделения файлов в пути'
 
 
-
 logical groupmember
 params
     gid   @IN  : Gid
@@ -2718,7 +2945,6 @@ function
         }
     }
 end
-
 
 
 logical access
@@ -2767,7 +2993,6 @@ function
 end
 
 
-
 logical is_all_files_in_path_dirs
 params
     os      @IN  : OS
@@ -2814,7 +3039,6 @@ function
 end
 
 
-
 logical sizeof
   params
     T   @IN      @CTYPE
@@ -2823,10 +3047,7 @@ end
   attr text: 'sizeof({T})'
 
 
-
 note 'OBJTREE_NOTE' is
 @objtree[root:OS]@
 endnote
-
 endmodule
-
