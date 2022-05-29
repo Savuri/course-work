@@ -862,20 +862,20 @@ end
 const PATH_MAX : Nat // Maximum path size in system
 
 
-# TODO описать алгоритм. Как я понимаю по итогу это нужно будет описывать с помощью алгоритма.
-event make_path_abs # если сокет абстрактный, то возвращаем путь. Если путь абсолютный, то избавляемся от ., .., символьных ссылок в пути. Если путь относительный, добавляем слева current_cur_path и избавляемся от ., .., символьных ссылок в пути.
+logical get_abs_path
 params
     current @IN  : Process
     path    @IN  : Text
     abs     @OUT : Text
 function
-    if (path(0) == '\0') {
+    if (path(0) == "\0") {
         return path
     }
     
-    * Если путь абсолютный, то избавляемся от ., .., символьных ссылок в пути. Если путь относительный, добавляем слева current_cur_path и избавляемся от ., .., символьных ссылок в пути (man path_resolution)
+    * Если путь абсолютный, то избавляемся от ., .., символьных ссылок в пути. 
+    * Если путь относительный, добавляем слева current_cur_path и избавляемся от ., .., символьных ссылок в пути 
+    * man path_resolution
 end
-    attr algorithm: 'Алгоритм приведения пути в абсолютный'
 
 
 
@@ -894,7 +894,7 @@ params
 function    
     possible_errors = bind_errors(os, current, sockfd, sockaddr, addrlen)    
     
-    sock_address = make_path_abs(current, sockaddr->sun_path)
+    sock_address = get_abs_path(current, sockaddr->sun_path)
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
@@ -1092,7 +1092,7 @@ params
     flags    @IN  : SockType-set
     ret      @OUT : Int
 function
-    possible_errors = accept4_errors(os, current, sockfd, sockaddr, addrlen, flags)
+    possible_errors = accept_errors(os, current, sockfd, sockaddr, addrlen, flags)
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
@@ -1164,7 +1164,7 @@ params
     addrlen  @IN  : Nat*
     ret      @OUT : Int
 function
-    possible_errors = accept_errors(os, current, sockfd, sockaddr, addrlen)
+    possible_errors = accept_errors(os, current, sockfd, sockaddr, addrlen, \emptyset)
     
     if (possible_errors != {. .}) {
           forany(error : Int | error \isin possible_errors) {
@@ -1678,7 +1678,8 @@ function
     
    return errors
 end
-#    attr algorithm: 'Алгоритм проверки корректности cmsgs'
+
+
 
 action sendmsg_generic // sendmsg_generic
 params
@@ -1719,6 +1720,9 @@ function
 end
 
 
+const SIGPIPE : Nat // SIGPIPE
+
+
 #If a blocked call to one of the following interfaces is
 #interrupted by a signal handler, then the call is automatically
 #restarted after the signal handler returns if the SA_RESTART flag
@@ -1753,6 +1757,10 @@ function
     possible_errors = sendmsg_errors(os, current, sockfd, msg, flags)
     
     if (possible_errors != {. .}) {
+        if (EPIPE \isin possible_errors && MSG_NOSIGNAL \notisin flags) {
+            add_to_list(current.proc_pending_signals, SIGPIPE)
+        }
+    
         forany(error : Int | error \isin possible_errors) {
   	        current.proc_errno := error
             return -1
@@ -1977,16 +1985,7 @@ function
     def i : Nat := 0
     def iov : iovec # снести в alias
 
-    if (reciver.socket_type == SOCK_DGRAM || reciver.socket_type == SOCK_SEQPACKET) {
-        # Копируется первый пришедший буффер
-        # Первый пришедший буффер копируется в msg.msg_iov, последовательно заполняя буфееры в msg.msg_iov. Если буфер больше суммарной длинные iov, то оставшиеся данные в буффере игнорируются
-        # Если в первом буффере есть дополнительные данные, они копируются, с установлением их длинны
-        # Этот буффер удаляется из socket.socket_buf
-        # Отмечается освожодение памяти для отправителя после считывания буффера
-        # Возвращает число считанных данных
-        # в msg.msg_name загружается адрес отправителя (если изначального буффера не хватает, msg_name зануляется и устанавливается кореектный размер в msg.msg_namelen
-        # в msg.msg_namelen длина адреса отправителя
-        
+    if (reciver.socket_type == SOCK_DGRAM || reciver.socket_type == SOCK_SEQPACKET) {       
         buf = reciver.socket_buf(0) // Первая пришедшая датаграмма
         sender = get_by_address(os, buf.sender) // Отправитель
 
@@ -2030,15 +2029,6 @@ function
             return copied
         }
     } else {// recvier.socket_type == SOCK_STREAM
-        # Всё, что ниже соотвствует следушющему текстовому описанию:
-        # Просматриваются буфферы. Они там в порядке прихода сообщения. Просматриваются до тех пор, пока в сообщении не все буферы заполнены и пока буфферы для считывания есть и пока не встречен буффер с дополнительными данными (если буффер с дополнительными данными присутсвует, то копируются данные и дополнительные данные, устанавливается размер дополнительных данных (в случае чего обрезаются), буфер удаляется и чтение прекращается)
-        # Данные из буфферов копируются в msg.msg_iov, последовательно заполняя буфееры в msg.msg_iov
-        # Прочитанные полностью буфферы удаляются из socket.socket_buf. Степень прочитанности буффера - sk_buff.consumed
-        # Отмечается освожодение памяти для отправителя после считывания буффера
-        # Возвращает число считанных данных
-        # в msg.msg_name загружается адрес отправителя (если изначального буффера не хватает, msg_name зануляется и устанавливается кореектный размер в msg.msg_namelen
-        # в msg.msg_namelen длина адреса отправителя
-        
         def cur_iov_base_size : Nat := 0 # cur_len of current iov
         def cur_buf_to_read : Nat := 0
         
@@ -2383,7 +2373,7 @@ function
     socket = get_sock_data(current, sockfd)
     openfile = get_open_file(current, sockfd)
     
-    abs_path = make_path_abs(current, sockaddr->sun_path)
+    abs_path = get_abs_path(current, sockaddr->sun_path)
     
     return {. errcode for errcode : Error | (errcode == EACCES) && (abs_path(0) != "\0" && !access_to_write(os, current, abs_path)) ||
         (errcode == EADDRINUSE) && (abs_path \isin \dom(os.os_socket_table)) || 
@@ -2463,37 +2453,6 @@ params
     sockfd   @IN  : Nat
     sockaddr @IN  : sockaddr_un-ref
     addrlen  @IN  : Nat*
-    ret      @OUT : Error-set    
-function
-#If address is not a null pointer, the address of the peer for the accepted connection shall be stored in the sockaddr structure pointed to by address, and the length of #this address shall be stored in the object pointed to by address_len.
-
-#If the actual length of the address is greater than the length of the supplied sockaddr structure, the stored address shall be truncated.
-    socket = get_sock_data(current, sockfd)
-    openfile = get_open_file(current, sockfd)
-    
-    return {. errcode for errcode : Error | (errcode == EAGAIN) && (O_NONBLOCK \isin openfile.of_flags && socket.socket_queue == <..>) || 
-        (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
-        (errcode == ECONNABORTED) && (False) || 
-        (errcode == EFAULT) && (False) ||
-        (errcode == EINVAL) && (\deref(addrlen) != sizeof('sockaddr_un') || socket.socket_status != LISTEN) || 
-        (errcode == EMFILE) && (set_len(\dom(current.proc_fds)) == MAX_FDS_PER_PROC) ||
-        (errcode == ENFILE) && (set_len(os.os_open_file_table) == MAX_OPEN_FILES) ||
-        (errcode == ENOBUFS) && (False) || 
-        (errcode == ENOMEM) && (False) || 
-        (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) || 
-        (errcode == EOPNOTSUPP) && (socket.socket_type != SOCK_STREAM && socket.socket_type != SOCK_SEQPACKET) || 
-        (errcode == EPROTO) && (False) .}
-end
-
-
-
-logical accept4_errors
-params
-    os       @IN  : OS
-    current  @IN  : Process
-    sockfd   @IN  : Nat
-    sockaddr @IN  : sockaddr_un-ref
-    addrlen  @IN  : Nat*
     flags    @IN  : SockType-set
     ret      @OUT : Error-set    
 function
@@ -2507,7 +2466,7 @@ function
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
         (errcode == ECONNABORTED) && (False) || 
         (errcode == EFAULT) && (False) ||
-        (errcode == EINVAL) && (\deref(addrlen) != sizeof('sockaddr_un') || socket.socket_status != LISTEN) || 
+        (errcode == EINVAL) && (\deref(addrlen) != sizeof('sockaddr_un') || socket.socket_status != LISTEN || RCV_SHUTDOWN \isin socket.socket_shutdown_flags) || 
         (errcode == EMFILE) && (set_len(\dom(current.proc_fds)) == MAX_FDS_PER_PROC) ||
         (errcode == ENFILE) && (set_len(os.os_open_file_table) == MAX_OPEN_FILES) ||
         (errcode == ENOBUFS) && (False) || 
@@ -2516,6 +2475,7 @@ function
         (errcode == EOPNOTSUPP) && (socket.socket_type != SOCK_STREAM && socket.socket_type != SOCK_SEQPACKET) || 
         (errcode == EPROTO) && (False) .}
 end
+
 
 
 logical close_errors
@@ -2625,12 +2585,13 @@ params
 function
     socket = get_sock_data(current, sockfd)
     openfile = get_open_file(current, sockfd)
-    other_path = make_path_abs(current, msg->msg_name)
     
     if (msg->msg_namelen == 0) {
-        other = socket.socket_peer   
+        sender_path = socket.socket_peer.socket_address
+        sender = socket.socket_peer
     } else {
-        other = get_by_address(os, other_path)
+        sender_path = get_abs_path(current, msg->msg_name)
+        sender = get_by_address(os, sender_path)
     }
 
     
@@ -2638,19 +2599,14 @@ function
     # нужно проверить что после wait всё открыто всё доступно
     return {. errcode for errcode : Error | (errcode == EAGAIN) && ((O_NONBLOCK \isin openfile.of_flags || MSG_DONTWAIT \isin flags) && socket.socket_buf == <. .>) || 
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
-        (errcode == ECONNREFUSED) && (socket.socket_addrlen == 0) || # сокет не был проинициализирован 
+        (errcode == ECONNREFUSED) && (socket.socket_addrlen == 0) || 
         (errcode == EFAULT) && (False) || 
         (errcode == EINVAL) && (MSG_OOB \isin MsgFlags) || 
         (errcode == ENOMEM) && (False) || 
         (errcode == ENOTCONN) && ((socket.socket_type == SOCK_STREAM || socket.socket_type == SOCK_SEQPACKET) && socket.socket_status != CONNECTED) || 
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) || 
-        (errcode == ECONNRESET) && ('Remote socket was unexpectedly closed.') || # в состояние wait
-        (errcode == ENOENT) && (\len(get_files_in_path(os, other_path)) == 0) ||
         (errcode == ENOTCONN) && (msg->msg_namelen == 0 && socket.socket_status != CONNECTED) ||
-        (errcode == EPERM) && ('The sender passed invalid credentials in the struct ucred.') ||
-        (errcode == EPIPE) && ('Remote socket was closed on a stream socket.  If enabled, a SIGPIPE is sent as well.   This  can  be  avoided  by  passing  the MSG_NOSIGNAL flag to send(2) or sendmsg(2).') || 
-        (errcode == EPROTOTYPE) && (socket.socket_type != other.socket_type) || 
-        (errcode == ESRCH) && ('While  sending  an  ancillary  message  containing   credentials (SCM_CREDENTIALS),  the  caller  specified  a  PID that does not match any existing process.') .}
+        (errcode == EPROTOTYPE) && (socket.socket_type != sender.socket_type) .}
 end
 
 
@@ -2666,21 +2622,21 @@ params
 function
     socket = get_sock_data(current, sockfd)
     openfile = get_open_file(current, sockfd)
-    other_path = make_path_abs(current, msg->msg_name)
     
     if (msg->msg_namelen == 0) {
-        other = socket.socket_peer   
+        reciver_path = socket.socket_peer.socket_address
+        reciver = socket.socket_peer
     } else {
-        other = get_by_address(os, other_path)
+        reciver_path = get_abs_path(current, msg->msg_name)
+        reciver = get_by_address(os, reciver_path)
     }
 
     # EPIPE - последний в sendmsg
-    return {. errcode for errcode : Error | (errcode == EACCES) && (!access_to_write(os, current, other_path)) || 
+    res1 = {. errcode for errcode : Error | (errcode == EACCES) && (!access_to_write(os, current, reciver_path)) || 
         (errcode == EAGAIN) && ((O_NONBLOCK \isin openfile.of_flags || MSG_DONTWAIT \isin flags) && (socket.socket_cur_buffer_cnt == max_msg_cnt(socket) || get_msg_len(msg) > socket.socket_so_sndbuf * 2 - socket.socket_used_buffer)) || 
         (errcode == EALREADY) && (False) || # for internet socket only 
         (errcode == EBADF) && (sockfd \notisin \dom(current.proc_fds)) || 
-        (errcode == ECONNRESET) && ('If you set SIGPIPE to be ignored you get the error instead of the signal. https://stackoverflow.com/questions/33053507/econnreset-in-send-linux-c') || 
-        (errcode == EDESTADDRREQ) && ((msg->msg_namelen == 0 && socket.socket_status == CONNECTED) || (msg.msg_namelen != 0 && other_path \notisin \dom(os.os_socket_table))) || 
+        (errcode == EDESTADDRREQ) && ((msg->msg_namelen == 0 && socket.socket_status == CONNECTED) || (msg.msg_namelen != 0 && reciver_path \notisin \dom(os.os_socket_table))) || 
         (errcode == EFAULT) && (False) ||  
         (errcode == EINVAL) && (MSG_OOB \isin flags) ||  
         (errcode == EISCONN) && (msg.msg_namelen != 0 && socket.socket_type == SOCK_STREAM && socket.socket_status == CONNECTED) ||  
@@ -2688,14 +2644,15 @@ function
         (errcode == ENOBUFS) && (False) ||  
         (errcode == ENOMEM) && (False) ||  
         (errcode == ENOTSOCK) && (openfile.of_type != SOCKET_TYPE) ||  
-        (errcode == EOPNOTSUPP) && ('Some bit in the flags argument is inappropriate for the socket type.') ||
-        (errcode == EPIPE) && ('Remote socket was closed on a stream socket.  If enabled, a SIGPIPE is sent as well.   This  can  be  avoided  by  passing  the MSG_NOSIGNAL flag to send(2) or sendmsg(2).') || 
-        (errcode == ECONNRESET) && ('Remote socket was unexpectedly closed.') || # в состояние wait
-        (errcode == ENOENT) && (\len(get_files_in_path(os, other_path)) == 0) ||
+        (errcode == EPIPE) && (SEND_SHUTDOWN \isin socket.socket_shutdown_flags || RCV_SHUTDOWN \isin reciver.socket_shutdown_flags) || 
+        (errcode == ECONNRESET) && (socket.socket_peer.socket_address \notisin \dom(os.os_socket_table)) ||
+        (errcode == ENOENT) && (\len(get_files_in_path(os, reciver_path)) == 0) ||
         (errcode == ENOTCONN) && (msg.msg_namelen == 0 && socket.socket_status != CONNECTED) ||
-        (errcode == EPERM) && ('The sender passed invalid credentials in the struct ucred.') ||
-        (errcode == EPROTOTYPE) && (socket.socket_type != other.socket_type) ||
-        (errcode == ESRCH) && ('While  sending  an  ancillary  message  containing   credentials (SCM_CREDENTIALS),  the  caller  specified  a  PID that does not match any existing process.') .} 
+        (errcode == EPROTOTYPE) && (socket.socket_type != reciver.socket_type) .}
+    
+    res2 = verify_cmsgs(os, current, sockfd, msg, flags) # ESRCH, EPERM, EINVAL
+    
+    return res1 \union res2
 end
 
 
@@ -2811,7 +2768,7 @@ end
 
 
 
-event is_all_files_in_path_dirs
+logical is_all_files_in_path_dirs
 params
     os      @IN  : OS
     current @IN  : Process
@@ -2828,10 +2785,9 @@ function
     
     return True
 end
-    attr algorithm: 'Алгоритм проверки ошибки ENOTDIR'
 
 
-event access_to_write
+logical access_to_write
 params
     os      @IN  : OS
     current @IN  : Process
@@ -2856,7 +2812,6 @@ function
     
     return True
 end
-    attr algorithm: 'Алгоритм, проверяющий наличие доступа на запись, для файла'
 
 
 
