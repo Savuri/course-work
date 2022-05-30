@@ -2089,24 +2089,24 @@ function
                 for (k1 in [0..fds_to_pass]) {
                     def fd : Nat := generate_fd(current)
                     current.proc_fds(fd) := 'mk_Fd(.fd_open_file_ref=buf.of_arr(k1), .fd_flags={. .})'
-                    buf.of_arr(k1).of_ref_cnt++
+                    buf.of_arr(k1).of_ref_cnt++ // Увлечить количество ссылок на файл
                     if (MSG_CMSG_CLOEXEC \isin flags) {
                         current.proc_fds(fd).fd_flags := {. FD_CLOEXEC .}
                     }
                     
-                    \deref(to_int_pointer(to_char_pointer(msg->msg_control) + cmsg_copied)) := fd 
+                    \deref(to_int_pointer(to_char_pointer(msg->msg_control) + cmsg_copied)) := fd // Скопировать созданный файловый дескриптор
                     cmsg_copied := cmsg_copied + sizeof('Int')
                 }
             }        
-        } elif (cmsg->cmsg_type == SCM_CREDENTIALS && SO_PASSCRED \isin reciver.socket_flags) { # cmsg->cmsg_type = SCM_CREDENTIALS и SO_PASSCRED ∈ reciver.socket_flags  
-            if (cmsg->cmsg_len > msg->msg_controllen - cmsg_copied) {
+        } elif (cmsg->cmsg_type == SCM_CREDENTIALS && SO_PASSCRED \isin reciver.socket_flags) { // cmsg->cmsg_type = SCM_CREDENTIALS b SO_PASSCRED принадлежит reciver.socket_flags
+            if (cmsg->cmsg_len > msg->msg_controllen - cmsg_copied) { // в буфере нет места
                 add_to_set(msg->msg_flags, MSG_CTRUNC)
             } else {
                 memcpy(to_void_pointer(to_char_pointer(msg->msg_control) + cmsg_copied), to_void_pointer(cmsg), cmsg->cmsg_len)
                 cmsg_copied := cmsg_copied + cmsg->cmsg_len
             }            
-        } elif (cmsg->cmsg_type == SCM_SECURITY && SO_PASSSEC \isin reciver.socket_flags) {
-            if (cmsg->cmsg_len > msg->msg_controllen - cmsg_copied) {
+        } elif (cmsg->cmsg_type == SCM_SECURITY && SO_PASSSEC \isin reciver.socket_flags) { // cmsg->cmsg_type == SCM_SECURITY и SO_PASSSEC принадлежит reciver.socket_flags
+            if (cmsg->cmsg_len > msg->msg_controllen - cmsg_copied) { // в буфере нет места
                 add_to_set(msg->msg_flags, MSG_CTRUNC)
             } else {
                 memcpy(to_void_pointer(to_char_pointer(msg->msg_control) + cmsg_copied), to_void_pointer(cmsg), cmsg->cmsg_len)
@@ -2119,7 +2119,7 @@ function
     
     msg->msg_controllen := cmsg_copied // Устанавливается размер дополнительных данных
 end
-    attr algorithm: 'Алгоритм получения контрольных данных.'
+    attr algorithm: 'Алгоритм получения дополнительных данных'
 
 
 
@@ -2132,73 +2132,79 @@ params
     flags   @IN  : MsgFlags
     ret     @OUT : Nat
 function
-    def copied : Nat := 0
+    def copied : Nat := 0 // Обозначить число считанных байт
     def i : Nat := 0
-    def iov : iovec # снести в alias
+    
 
-    if (reciver.socket_type == SOCK_DGRAM || reciver.socket_type == SOCK_SEQPACKET) {       
-        buf = reciver.socket_buf(0) // Первая пришедшая датаграмма
-        def sender : Socket := get_by_address(os, buf.sender) // Отправитель
+    if (reciver.socket_type == SOCK_DGRAM || reciver.socket_type == SOCK_SEQPACKET) { // сокет использует датаграмнный ввод/вывод (recvier.socket_type  -= SOCK_DGRAM || recvier.socket_type = SOCK_SEQPACKET)      
+        buf = reciver.socket_buf(0) // первый пришедшый буффер
+        def sender : Socket := get_by_address(os, buf.sender) // Вычислим отправителя
+        if (msg->msg_name != to_char_pointer(NULL)) { // нужно указать адрес отпарвителя
+            msg->msg_name := to_char_arr(sender.socket_name) // Изменяем значение пользовательского буфера на адрес отправителя
+            msg->msg_namelen := reciver.socket_peer.socket_addrlen // Изменяем значение размера пользовательского буфера
+        }
 
         while (i < msg->msg_iovlen && buf.consumed < buf.data_len) {
-            iov := msg->msg_iov[i]
-            cur_dgram_copied = min(iov.iov_len, buf.data_len - buf.consumed)
+            iov = msg->msg_iov[i]
             
-            memcpy(iov.iov_base, buf.buf_data + buf.consumed, cur_dgram_copied)
-            copied := copied + cur_dgram_copied
-            buf.consumed := buf.consumed + cur_dgram_copied
+            memcpy(iov.iov_base, buf.buf_data + buf.consumed, min(iov.iov_len, buf.data_len - buf.consumed)) // Скопировать данные
+            copied := copied + min(iov.iov_len, buf.data_len - buf.consumed)
+            buf.consumed := buf.consumed + min(iov.iov_len, buf.data_len - buf.consumed)
             
-            if (cur_dgram_copied == iov.iov_len) {
+            if (min(iov.iov_len, buf.data_len - buf.consumed) == iov.iov_len) {
                 i++
             }
         }  
         
-        if (buf.control_len != 0) {
-            get_cmsg_data(os, current, reciver, msg, flags, buf)
+        if (buf.control_len != 0) { // есть дополнительные данные
+            get_cmsg_data(os, current, reciver, msg, flags, buf) // Копируются дополнительный данные
         } else {
-            // Если их нет, то буффер == null
-            msg->msg_control := NULL
-            //Устанавливается размер дополнительных данных
+            msg->msg_control := NULL 
             msg->msg_controllen := 0
         }
                 
-        if (buf.consumed != buf.data_len) {
+        if (buf.consumed != buf.data_len) { // считана не вся датаграмма
             add_to_set(msg->msg_flags, MSG_TRUNC)
         }
         
-        if (MSG_PEEK \notisin flags) {
-            sender.socket_used_buffer := sender.socket_used_buffer - buf.data_len // Освобождается память в буффере отправителя для последующих сообщений.
-            sender.socket_cur_buffer_cnt-- 
-            del_from_list(reciver.socket_buf) // Прочитанная датаграмма удаляется.
+        if (MSG_PEEK \notisin flags) { // читали не в режиме подсматривания
+            sender.socket_used_buffer := sender.socket_used_buffer - buf.data_len // Освобождается память в буфере отправителя для последующих сообщений
+            sender.socket_cur_buffer_cnt-- // Уменьшается число инициализированных отправителем буферов
+            del_from_list(reciver.socket_buf) // Прочитанная датаграмма удаляется
         } else {
             buf.consumed := buf.consumed - copied
         }
         
         if (reciver.socket_type == SOCK_DGRAM && MSG_TRUNC \isin flags) {
-            return buf.data_len // return real dgram size
+            return buf.data_len // вернуть настоящий размер датаграммы
         } else {
-            return copied
+            return copied // вернуть число считанных байт
         }
-    } else {// recvier.socket_type == SOCK_STREAM
-        def cur_iov_base_size : Nat := 0 # cur_len of current iov
-        def cur_buf_to_read : Nat := 0
+    } else {// ввод/вывод потоковый (recvier.socket_type == SOCK_STREAM)
+        def cur_iov_base_size : Nat := 0 // Обозначить количество считаных для текущего iov вектора байт
+        def cur_buf_to_read : Nat := 0 // Обозначить количетсво считанных буфферов
+        def beg_buf_consumed : Nat := reciver.socket_buf(0).consumed // Сохранить количество потреблённых данных в первом буфере
+        if (msg->msg_name != to_char_pointer(NULL)) { // нужно указать адрес отпарвителя 
+            msg->msg_name := to_char_arr(reciver.socket_peer.socket_name) // Изменяем значение пользовательского буфера на адрес отправителя
+            msg->msg_namelen := reciver.socket_peer.socket_addrlen // Изменяем значение размера пользовательского буфера
+        }
         
-        while (i < msg->msg_iovlen && cur_buf_to_read < \len(reciver.socket_buf)) {
+        while (i < msg->msg_iovlen && cur_buf_to_read < \len(reciver.socket_buf)) { // есть буффер для чтения
             buf = reciver.socket_buf(cur_buf_to_read)
             
             def cur_stream_copied : Nat := 0
-            # copy one socket buff
-            while (i < msg->msg_iovlen && buf.consumed < buf.data_len) {
-                iov := msg->msg_iov[i]
+           
+            while (i < msg->msg_iovlen && buf.consumed < buf.data_len) { // буфер не считан полностью
+                iov = msg->msg_iov[i]
             
                 bytes_to_copy = min(iov.iov_len - cur_iov_base_size, buf.data_len - buf.consumed)
                 
+                memcpy(to_void_pointer(to_char_pointer(iov.iov_base) + cur_iov_base_size), to_void_pointer(to_char_pointer(buf.buf_data) + buf.consumed), bytes_to_copy) // Скопировать данные в буфер
                 cur_stream_copied := cur_stream_copied + bytes_to_copy
                 cur_iov_base_size := cur_iov_base_size + bytes_to_copy
-                memcpy(iov.iov_base + cur_iov_base_size, buf.buf_data + buf.consumed, bytes_to_copy) // Предполагаю, что адресная арифметика для void* (т.е. iov.iov_base) байтова (void *) + 1 - сдвиг адреса на единицу
                 buf.consumed := buf.consumed + bytes_to_copy
             
-                if (cur_iov_base_size == iov.iov_len) {
+                if (cur_iov_base_size == iov.iov_len) { // был считан весь iov вектор
                     cur_iov_base_size := 0
                     i++
                 }
@@ -2206,36 +2212,55 @@ function
             
             copied := copied + cur_stream_copied
             
-            if ('buf.buf_control_data != NULL && buf.consumed == buf.data_len') { // Если есть дополнительные данные
-                // Копируются дополнительный данные
-                get_cmsg_data(os, current, reciver, msg, flags, buf)
+            if (buf.buf_control_data != NULL && buf.consumed == buf.data_len) { // Если есть дополнительные данные
+                get_cmsg_data(os, current, reciver, msg, flags, buf) // Копируются дополнительный данные
                 
-                goto endRead
-            } elif (buf.consumed == buf.data_len) {
+                goto endRead // остановить копирование
+            } elif (buf.consumed == buf.data_len) { 
                 cur_buf_to_read++
             }
         }
         
 endRead:       
-        if (MSG_PEEK \notisin flags) {
-            for (k in [0..cur_buf_to_read]) {
-                buf = reciver.socket_buf(0)
-            
-                for (k1 in [0..\len(buf.of_arr)]) {
-                    buf.of_arr(k1).of_ref_cnt--
-                }
+        if (MSG_PEEK \isin flags) { // чтение без удаления из буфера
+            reciver.socket_buf(0).consumed := beg_buf_consumed // Востановить значение потреблённых данных в первом буфере
+        
+            for (k in [1..cur_buf_to_read]) {
+                reciver.socket_buf(k).consumed := 0 // Установить значение потреблённых данных равным нуля в буфере
+            }
+        } else { // чтение с удалением
+            for (l in [0..cur_buf_to_read - 1]) {
+                buf = reciver.socket_buf(0) // Берём l-ый буфер 
             
                 other = get_by_address(os, buf.sender)
-                other.socket_used_buffer := other.socket_used_buffer - buf.data_len
-                other.socket_cur_buffer_cnt--
-                del_from_list(socket_buf)
+                other.socket_used_buffer := other.socket_used_buffer - buf.data_len // Освобождается память в буфере отправителя для последующих сообщений
+                other.socket_cur_buffer_cnt-- // Уменьшается число инициализированных буферов сокета-отправителя
+                
+                for (k1 in [0..\len(socket_buf(0).of_arr)]) {
+                    socket_buf(0).of_arr(k1).of_ref_cnt-- // Удалить ссылки на открытые файла для передаваемые буффера 
+                }
+                
+                del_from_list(socket_buf) // Прочитанный буфер удаляется
+            }
+            
+            if (socket_buf(0).consumed == socket_buf(0).data_len) { // последний буфер был потреблён полностью
+                buf = reciver.socket_buf(0) // Берём последний буфер
+                other = get_by_address(os, buf.sender)
+                other.socket_used_buffer := other.socket_used_buffer - buf.data_len // Освобождается память в буфере отправителя для последующих сообщений
+                other.socket_cur_buffer_cnt-- // Уменьшается число инициализированных отправителем буферов
+                
+                for (h in [0..\len(socket_buf(0).of_arr)]) {
+                    socket_buf(0).of_arr(h).of_ref_cnt-- // Удалить ссылки на открытые файла для передаваемые буффера 
+                }
+                
+                del_from_list(socket_buf) // Прочитанный буфер удаляется
             }
         }
         
         return copied     
    }
 end
-    attr algorithm: 'Алгоритм получения данных.'
+    attr algorithm: 'Алгоритм получения данных'
 
 
 
@@ -2264,15 +2289,7 @@ function
     wait INFWAIT { // состояние ожидания после вызова функции получения данных из сокета
         trigger (msg_have_come(socket)) { // появилось сообщения для считывания в буффере
             current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
-            
-            if (msg->msg_name != to_char_pointer(NULL)) {
-                res = get_data(os, current, socket, msg, flags)
-                # msg_namelen ссылкается на поданный буффер, так что заполняя его, в get_data сразу заполняем ответ. 
-                \deref(paddrlen) := msg.msg_namelen # с длинной адресса не так
-            } else {
-                res = get_data(os, current, socket, msg, flags)
-            }
-        
+            res = get_data(os, current, socket, msg, flags)
             
             return res
         }
@@ -2488,7 +2505,7 @@ function
 
     socket = get_sock_data(current, sockfd)
 
-    if (\deref(addrlen) >= socket.socket_peer.socket_addrlen) {
+    if (\deref(addrlen) >= socket.socket_peer.socket_addrlen) { // в переданном буфере достаточно места
         address->sun_family := AF_UNIX
         address->sun_path := to_char_arr(socket.socket_peer.socket_name)
     } else { # Buffer is too small
@@ -2534,10 +2551,10 @@ function
 
     socket = get_sock_data(current, sockfd)
 
-    if (\deref(addrlen) > socket_addrlen) {
+    if (\deref(addrlen) > socket_addrlen) { // в переданном буффере достаточно места
         address->sun_family := AF_UNIX
         address->sun_path := to_char_arr(socket.socket_name)
-    } else { // Buffer is too small
+    } else { 
         truncate_address(address, \deref(addrlen)) 
     }
     
