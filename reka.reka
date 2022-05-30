@@ -2939,12 +2939,11 @@ params
     path @IN  : Text
     res  @OUT : File-list
 function
-    def res_list : File-list := <. .>
+    def res_list : File-list := <. .> // Создаётся результирующий список файлов
     
     for (i in [0..\len(path)]) {
-        if (path(i) == "/") {
+        if (path(i) == "/") { 
             def file_abs_path : Text := ""
-            cur_file = os.os_files(i)
             
             for (k in [0..i]) {
                 file_abs_path(k) := path(k)
@@ -2952,8 +2951,10 @@ function
             
             def was_found : Bool := False
             def j : Nat := 0
-            while ('j < \len(os.os_files) && !was_found') {
-                
+            def cur_file : File := os.os_files(j)
+            while (j < \len(os.os_files) && !was_found) {
+                cur_file := os.os_files(j)
+            
                 if (cur_file.file_path == file_abs_path) {
                     was_found := True
                 }
@@ -2961,11 +2962,10 @@ function
                 j++
             }
             
-            if (was_found) {
-                add_to_list(res_list, cur_file)
-            } else {
-                res_list := <. .>
-                return res_list
+            if (was_found) { // файл в пути был найден
+                add_to_list(res_list, cur_file) 
+            } else { // в пути не было файла
+                return <. .> 
             }
         }
     }
