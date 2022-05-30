@@ -1846,9 +1846,11 @@ params
 function
     possible_errors = sendmsg_errors(os, current, sockfd, msg, flags)
     
-    if (possible_errors != {. .}) {
-        if (EPIPE \isin possible_errors && MSG_NOSIGNAL \notisin flags) {
-            add_to_list(current.proc_pending_signals, SIGPIPE)
+    if (possible_errors = {. .}) {
+        if (EPIPE \isin possible_errors) { # По другому не строится граф
+            if (MSG_NOSIGNAL \notisin flags) {
+                add_to_list(current.proc_pending_signals, SIGPIPE)
+            }
         }
     
         forany(error : Int | error \isin possible_errors) {
@@ -1857,8 +1859,11 @@ function
         }
     }
 
+
     sendmsg_generic(os, current, sockfd, msg, flags)
 end
+    attr summary-cfg: True
+    attr algo-tree: True
 
 
 function sendto is
@@ -1894,9 +1899,11 @@ function
     
     possible_errors = sendmsg_errors(os, current, sockfd, \ref(msg), flags)
     
-    if (possible_errors != {. .}) {
-        if (EPIPE \isin possible_errors && MSG_NOSIGNAL \notisin flags) {
-            add_to_list(current.proc_pending_signals, SIGPIPE)
+    if (possible_errors = {. .}) {
+        if (EPIPE \isin possible_errors) { # По другому не строится граф
+            if (MSG_NOSIGNAL \notisin flags) {
+                add_to_list(current.proc_pending_signals, SIGPIPE)
+            }
         }
     
         forany(error : Int | error \isin possible_errors) {
@@ -1904,10 +1911,12 @@ function
             return -1
         }
     }
+
     
     sendmsg_generic(os, current, sockfd, \ref(msg), flags)
 end
-
+    attr summary-cfg: True
+    attr algo-tree: True
 
 function send is
 /**
@@ -1937,9 +1946,11 @@ function
     
     possible_errors = sendmsg_errors(os, current, sockfd, \ref(msg), flags)
     
-    if (possible_errors != {. .}) {
-        if (EPIPE \isin possible_errors && MSG_NOSIGNAL \notisin flags) {
-            add_to_list(current.proc_pending_signals, SIGPIPE)
+    if (possible_errors = {. .}) {
+        if (EPIPE \isin possible_errors) { # По другому не строится граф
+            if (MSG_NOSIGNAL \notisin flags) {
+                add_to_list(current.proc_pending_signals, SIGPIPE)
+            }
         }
     
         forany(error : Int | error \isin possible_errors) {
@@ -1947,10 +1958,12 @@ function
             return -1
         }
     }
+
     
     sendmsg_generic(os, current, sockfd, \ref(msg), flags)
 end
-
+    attr summary-cfg: True
+    attr algo-tree: True
 
 function write is
 /**
@@ -1980,16 +1993,22 @@ function
     
     possible_errors = sendmsg_errors(os, current, sockfd, \ref(msg), \emptyset)
     
-    if (possible_errors != {. .}) {
+    if (possible_errors = {. .}) {
+        if (EPIPE \isin possible_errors) { # По другому не строится граф
+            add_to_list(current.proc_pending_signals, SIGPIPE)
+        }
+    
         forany(error : Int | error \isin possible_errors) {
   	        current.proc_errno := error //! Установить атрибуту proc_errno текущего процесса значение error.
             return -1
         }
     }
+
     
     sendmsg_generic(os, current, sockfd, \ref(msg), \emptyset)
 end
-
+    attr summary-cfg: True
+    attr algo-tree: True
 
 #seqpacket в io ~ dgram
 event min
@@ -2247,9 +2266,9 @@ function
         trigger (msg_have_come(socket)) { // появилось сообщения для считывания в буффере
             current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
             
-            if (msg->msg_name == to_char_pointer(NULL) && paddrlen == to_nat_pointer(NULL)) {
+            if (msg->msg_name != to_char_pointer(NULL)) {
                 res = get_data(os, current, socket, msg, flags)
-                # msg_namelen ссылкается на поданный буффер, так что заполняя его, сразу заполняем ответ. 
+                # msg_namelen ссылкается на поданный буффер, так что заполняя его, в get_data сразу заполняем ответ. 
                 \deref(paddrlen) := msg.msg_namelen # с длинной адресса не так
             } else {
                 res = get_data(os, current, socket, msg, flags)
@@ -2266,7 +2285,9 @@ function
         }
     }
 end
-
+    attr summary-cfg: True
+    attr algo-tree: True
+    
 
 function recvmsg is
 /**
@@ -2299,6 +2320,8 @@ function
 
     recvmsg_generic(os, current, sockfd, msg, flags, \ref(msg->msg_namelen))
 end
+    attr summary-cfg: True
+    attr algo-tree: True
 
 
 function recvfrom is
@@ -2340,6 +2363,8 @@ function
     
     recvmsg_generic(os, current, sockfd, msg, flags, addrlen)
 end
+    attr summary-cfg: True
+    attr algo-tree: True
 
 
 function recv is
@@ -2379,7 +2404,9 @@ function
     
     recvmsg_generic(os, current, sockfd, msg, flags, to_nat_pointer(NULL))
 end
-
+    attr summary-cfg: True
+    attr algo-tree: True
+    
 
 function read is
 /**
@@ -2417,6 +2444,9 @@ function
     
     recvmsg_generic(os, current, sockfd, msg, \emptyset, to_nat_pointer(NULL))
 end
+    attr summary-cfg: True
+    attr algo-tree: True
+
 
 
 action truncate_address // Заполнить всю структуру нулями. 
@@ -3045,7 +3075,6 @@ logical sizeof
     res @OUT   : Int # size_t
 end
   attr text: 'sizeof({T})'
-
 
 note 'OBJTREE_NOTE' is
 @objtree[root:OS]@
