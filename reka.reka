@@ -637,6 +637,17 @@ function
     * Преобразует указатель в void*
 end
     attr text: '((void*) {prm1})'
+    
+    
+logical to_int
+params
+    T    @TYPE
+    prm1 @IN  : T
+    ret  @OUT : Int
+function
+    * Преобразует в int
+end
+    attr text: '((int) {prm1})'
 
 
 
@@ -869,21 +880,182 @@ const PATH_MAX : Nat // Maximum path size in system
 
 
 
-logical get_abs_path
+event strlen
+params
+    char_arr @IN  : Char*
+    arr_len  @OUT : Nat
+function
+    def i : Nat := 0
+    
+    while (char_arr[i] != "\0") {
+        i++
+    }
+    
+    return i
+end
+    attr algorithm: 'Алгоритм strlen({char_arr})'
+
+
+
+event strchr
+params
+    char_arr @IN  : Char*
+    to_find  @IN  : Char
+    ret      @OUT : Char*
+function
+    def i :  Nat := 0
+    
+    while (\deref(char_arr + i) != to_find) {
+        i++
+    }
+    
+    return char_arr + i
+end
+    attr algorithm: 'Алгоритм strchr({char_arr}, {to_find})'
+
+
+event strcmp
+params
+    first  @IN  : Char*
+    second @IN  : Char*
+    bool   @OUT : Bool
+function
+    def i1 : Nat := 0
+    def i2 : Nat := 0
+
+    while (\deref(first + i1) != "\0" && \deref(first + i1) == \deref(second + i2)) {
+        i1++
+        i2++
+    }
+   
+    return \deref(first + i1) == \deref(second + i2)
+end
+    attr algorithm: 'Алгоритм strcmp({first}, {second})'
+
+
+
+event normalize_one_jump
+params
+    cur_dir @IN : Char*
+    left    @IN : Char*
+function
+    if (!strcmp(left, ".")) {
+        cur_dir[PATH_MAX - 1] := "\0"
+        return
+    }
+
+    if (!strcmp(left, "..")) { 
+        if (!strcmp(cur_dir, "/")) {
+            cur_dir[1] := "\0"
+            return
+        }
+
+        def new_ptr : Char* := strchr(cur_dir, "/")
+
+        if (new_ptr == cur_dir) {
+            # "/one_dir"
+            cur_dir[1] := "\0"
+            return
+        }
+
+        \deref(new_ptr) := "\0"
+        return
+    }
+
+    def ptr : Char* := cur_dir + strlen(cur_dir)
+    if (strcmp(cur_dir, "/") && to_int(ptr) < to_int(cur_dir + PATH_MAX - 1)) {
+        # it is not root
+        \deref(ptr) := "/"
+        ptr++
+    }
+
+    memcpy(to_void_pointer(ptr), to_void_pointer(left), PATH_MAX - strlen(ptr) - 1)
+    cur_dir[PATH_MAX - 1] := "\0"
+end
+    attr algorithm: 'Алгоритм для normalize path: normalize_one_jump'
+
+
+
+event normalize_path
+params
+    dir_in   @IN  : Text
+    path_in  @IN  : Char*
+    path_len @IN  : Nat
+    abs      @OUT : Text
+function
+    def path    : Char* := "" // Буфер размера PATH_MAX
+    def cur_dir : Char* := "" // Буфер размера PATH_MAX
+    memcpy(to_void_pointer(path), to_void_pointer(path_in), path_len)
+    memcpy(to_void_pointer(cur_dir), to_void_pointer(to_char_arr(dir_in)), path_len)
+    
+    cur_dir[PATH_MAX - 1] := "\0"
+    path[PATH_MAX - 1] := "\0"
+
+    if (path[0] == "/") {
+        cur_dir[1] := "\0"
+        
+        for (i in [0..strlen(path)]) {
+            path[i] := path[i + 1]
+        }
+    }
+    
+    
+
+    if (path[strlen(path) - 1] == "/") {
+        path[strlen(path) - 1] := "\0"
+    } else {
+        path[PATH_MAX - 1] := "\0"
+    }
+
+    # [left, right)
+    def left : Char* := path
+    def right : Char* := strchr(left + 1, "/")
+    
+
+    while (right != to_char_pointer(NULL)) {
+        \deref(right) := "\0"
+        
+        #normalize_path_one_jump(cur_dir, left)
+        normalize_one_jump(cur_dir, left)
+        #end of normalize one jump
+        
+        left := right + 1
+        right := strchr(left + 1, "/")
+    }
+
+    #normalize one jump
+    normalize_one_jump(cur_dir, left)
+    #end of normalize onejump
+    
+    
+    
+    cur_dir[PATH_MAX - 1] := "\0"
+    
+    return to_text(cur_dir, strlen(cur_dir))
+end
+    attr algorithm: 'Алгоритм получения абсолютного пути (без symlink(как и всё в модели))'
+
+
+
+
+logical get_abs_path # без symlink
 params
     current  @IN  : Process
     path     @IN  : Char*
     path_len @IN  : Nat
     abs      @OUT : Text
 function
-    if (path[0] == "\0") {
+    # Если path - относительный адрес то ничего не делаем
+    # Если путь абсолютный, то избавляемся от ., .., символьных ссылок в пути. 
+    # Если путь относительный, добавляем слева current.proc_cur_path и избавляемся от ., .. и символьных ссылок в пути 
+    # man path_resolution
+    # Вернуть полученный адрес
+
+    if (path[0] == "\0") { // path - относительный адрес
         return to_text(path, path_len)
     }
     
-    * Если путь абсолютный, то избавляемся от ., .., символьных ссылок в пути. 
-    * Если путь относительный, добавляем слева current.proc_cur_path и избавляемся от ., .. и символьных ссылок в пути 
-    # man path_resolution
-    * Вернуть полученный адрес
+    return normalize_path(current.proc_cur_path, path, path_len)
 end
     attr text: 'абсолютный путь файла {path}'
 
@@ -1008,7 +1180,7 @@ params
     server     @IN  : Socket
     res        @OUT : Bool
 end
-    attr event-desc: Появилось место для постановки себя в очередь на подключение (\len(server.socket_queue) < server.socket_backlog)
+    attr event-desc: Появиления места для постановки себя в очередь на подключение (\len(server.socket_queue) < server.socket_backlog)
 
 
 
@@ -1020,7 +1192,7 @@ params
     socket     @IN  : Socket
     res        @OUT : Bool 
 end
-    attr event-desc: Запрос на подключение был принят сервером. (socket \notisin server.socket_queue).
+    attr event-desc: принятия запроса на подключение сервером. (socket \notisin server.socket_queue).
 
 
 function connect is
@@ -1108,7 +1280,7 @@ params
     server     @IN  : Socket
     res        @OUT : Bool
 end
-    attr event-desc: Появился запрос на подключение (server.socket_queue != <..>)
+    attr event-desc: появления запрос на подключение (server.socket_queue != <..>)
 
 
 function accept4 is
@@ -1450,126 +1622,6 @@ end
 
 ############## IO part start ###########
 
-#TODO
-#event getsockopt
-#params
-#    os      @IN  : OS
-#    current @IN  : Process
-#    sockfd  @IN  : Nat
-#    level   @IN  : Level
-#    optname @IN  : SocketFlag
-#    optval  @IN  : void*
-#    optlen  @IN  : Nat*
-#    ret     @OUT : Int
-#function
-#    if (optname == SO_ACCEPTCONN) {
-#    } elif (optname == SO_ATTACH_FILTER) {
-#    } elif (optname == SO_ATTACH_BPF) {
-#    } elif (optname == SO_ATTACH_REUSEPORT_CBPF) {
-#    } elif (optname == SO_ATTACH_REUSEPORT_EBPF) {
-#    } elif (optname == SO_BINDTODEVICE) {
-#    } elif (optname == SO_BROADCAST) {
-#    } elif (optname == SO_BSDCOMPAT) {
-#    } elif (optname == SO_DEBUG) {
-#    } elif (optname == SO_DETACH_FILTER) {
-#    } elif (optname == SO_DETACH_BPF) {
-#    } elif (optname == SO_DOMAIN) {
-#    } elif (optname == SO_ERROR) {
-#    } elif (optname == SO_DONTROUTE) {
-#    } elif (optname == SO_INCOMING_CPU) {
-#    } elif (optname == SO_KEEPALIVE) {
-#    } elif (optname == SO_LINGER) {
-#    } elif (optname == SO_LOCK_FILTER) {
-#    } elif (optname == SO_MARK) {
-#    } elif (optname == SO_OOBINLINE) {
-#    } elif (optname == SO_PASSCRED) {
-#    } elif (optname == SO_PASSSEC) {
-#    } elif (optname == SO_PEEK_OFF) {
-#    } elif (optname == SO_PEERCRED) {
-#    } elif (optname == SO_PRIORITY) {
-#    } elif (optname == SO_PROTOCOL) {
-#    } elif (optname == SO_RCVBUF) {
-#    } elif (optname == SO_RCVBUFFORCE) {
-#    } elif (optname == SO_RCVLOWAT) {
-#    } elif (optname == SO_SNDLOWAT) {
-#    } elif (optname == SO_RCVTIMEO) {
-#    } elif (optname == SO_SNDTIMEO) {
-#    } elif (optname == SO_REUSEADDR) {
-#    } elif (optname == SO_REUSEPORT) {
-#    } elif (optname == SO_RXQ_OVFL) {
-#    } elif (optname == SO_SNDBUF) {
-#    } elif (optname == SO_SNDBUFFORCE) {
-#    } elif (optname == SO_TIMESTAMP) {
-#    } elif (optname == SO_TIMESTAMPNS) {
-#    } elif (optname == SO_TYPE) {
-#    } elif (optname == SO_BUSY_POLL) {
-#    } elif (optname == SO_TIMESTAMPING) {
-#    }
-#    
-#    return 0
-#end
-
-
-#event setsockopt
-#params
-#    os      @IN  : OS
-#    current @IN  : Process
-#    sockfd  @IN  : Nat
-#    level   @IN  : Level
-#    optname @IN  : SocketFlag
-#    optval  @IN  : void*
-#    optlen  @IN  : Nat
-#    ret     @OUT : Int
-#function
-#    #if (optname == SO_ACCEPTCONN) - не settable
-#    if (optname == SO_ATTACH_FILTER) {
-#    } elif (optname == SO_ATTACH_BPF) {
-#    } elif (optname == SO_ATTACH_REUSEPORT_CBPF) {
-#    } elif (optname == SO_ATTACH_REUSEPORT_EBPF) {
-#    } elif (optname == SO_BINDTODEVICE) {
-#    } elif (optname == SO_BROADCAST) {
-#    } elif (optname == SO_BSDCOMPAT) {
-#    } elif (optname == SO_DEBUG) {
-#    } elif (optname == SO_DETACH_FILTER) {
-#    } elif (optname == SO_DETACH_BPF) {
-#    } elif (optname == SO_DOMAIN) {
-#    } elif (optname == SO_ERROR) {
-#    } elif (optname == SO_DONTROUTE) {
-#    } elif (optname == SO_INCOMING_CPU) {
-#    } elif (optname == SO_KEEPALIVE) {
-#    } elif (optname == SO_LINGER) {
-#    } elif (optname == SO_LOCK_FILTER) {
-#    } elif (optname == SO_MARK) {
-#    } elif (optname == SO_OOBINLINE) {
-#    } elif (optname == SO_PASSCRED) {
-#    } elif (optname == SO_PASSSEC) {
-#    } elif (optname == SO_PEEK_OFF) {
-#    } elif (optname == SO_PEERCRED) {
-#    } elif (optname == SO_PRIORITY) {
-#    } elif (optname == SO_PROTOCOL) {
-#    } elif (optname == SO_RCVBUF) {
-#    } elif (optname == SO_RCVBUFFORCE) {
-#    } elif (optname == SO_RCVLOWAT) {
-#    } elif (optname == SO_SNDLOWAT) {
-#    } elif (optname == SO_RCVTIMEO) {
-#    } elif (optname == SO_SNDTIMEO) {
-#    } elif (optname == SO_REUSEADDR) {
-#    } elif (optname == SO_REUSEPORT) {
-#    } elif (optname == SO_RXQ_OVFL) {
-#    } elif (optname == SO_SNDBUF) {
-#    } elif (optname == SO_SNDBUFFORCE) {
-#    } elif (optname == SO_TIMESTAMP) {
-#    } elif (optname == SO_TIMESTAMPNS) {
-#    } elif (optname == SO_TYPE) {
-#    } elif (optname == SO_BUSY_POLL) {
-#    } elif (optname == SO_TIMESTAMPING) {
-#    }
-#    
-#    return 0
-#end
-
-
-
 logical interrupt_logical
 params
     pre_state  @IN  : Universe
@@ -1578,7 +1630,9 @@ params
     socket     @IN  : Socket
     res        @OUT : Bool
 end
-    attr event-desc: Прерывание ожидания процесса, из-за прихода сигнала, который не блокируется маской (current.proc_pending_signals != <..> && exists x:Nat | (x \isin current.proc_pending_signals) && (x \notisin curren.proc_blocked_signals)). Если для пришедшего сигнала верно SA_RESTART \isin current.proc_signal_flags(signum) && SO_RCVTIMEO \notisin socket.socket_flags это эквиваленто перезапуску системного вызова т.е. в этом случае res == False, иначе res == True. 
+    attr event-desc: прерывания ожидания процесса, из-за прихода сигнала, который не блокируется маской (current.proc_pending_signals != <..> && exists x:Nat | (x \isin current.proc_pending_signals) && (x \notisin curren.proc_blocked_signals) && SA_RESTART \isin current.proc_signal_flags(x))
+   
+#Если для пришедшего сигнала верно SA_RESTART \isin current.proc_signal_flags(signum) && SO_RCVTIMEO \notisin socket.socket_flags это эквиваленто перезапуску системного вызова т.е. в этом случае res == False, иначе res == True. 
 
 
 
@@ -1670,7 +1724,7 @@ params
     reciver    @IN  : Socket
     res        @OUT : Bool
 end
-    attr event-desc: Ждём освобождение места в буффера отправителя. (sender.socket_cur_buffer_cnt < max_msg_cnt(sender) && get_msg_len(msg) <= socket.socket_so_sndbuf * 2 - socket.socket_used_buffer)
+    attr event-desc: освобождения места в буффера отправителя (sender.socket_cur_buffer_cnt < max_msg_cnt(sender) && get_msg_len(msg) <= socket.socket_so_sndbuf * 2 - socket.socket_used_buffer)
 
 
 #TODO:
@@ -2229,8 +2283,9 @@ endRead:
                 reciver.socket_buf(k).consumed := 0 // Установить значение потреблённых данных равным нуля в буфере
             }
         } else { // чтение с удалением
-            for (l in [0..cur_buf_to_read - 1]) {
-                buf = reciver.socket_buf(0) // Берём l-ый буфер 
+            def l : Nat := 0
+            while (l < (cur_buf_to_read - 1)) {
+                buf = reciver.socket_buf(0) // Берём буфер l 
             
                 other = get_by_address(os, buf.sender)
                 other.socket_used_buffer := other.socket_used_buffer - buf.data_len // Освобождается память в буфере отправителя для последующих сообщений
@@ -2270,7 +2325,7 @@ params
     post_state @IN  : Universe
     server     @IN  : Socket
 end
-    attr event-desc: Появилось сообщения для считывания в буффере. (server.socket_buf != <. .>))
+    attr event-desc: появления сообщения для считывания в буффере. (server.socket_buf != <. .>))
 
 
 
