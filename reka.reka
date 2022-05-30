@@ -2010,8 +2010,8 @@ end
     attr summary-cfg: True
     attr algo-tree: True
 
-#seqpacket в io ~ dgram
-event min
+
+logical min
 params
     lhs @IN  : Int
     rhs @IN  : Int
@@ -2023,10 +2023,10 @@ function
         return rhs
     }
 end
-    attr algorithm: 'Алгоритм получения минимального среди двух Int.'
+    attr text: 'минимум из {lhs} и {rhs}'
     
     
-event max
+logical max
 params
     lhs @IN  : Int
     rhs @IN  : Int
@@ -2038,7 +2038,7 @@ function
         return rhs
     }
 end
-    attr algorithm: 'Алгоритм получения максимального среди двух Int.'
+    attr text: 'максимум из {lhs} и {rhs}'
 
 
 event memcpy
@@ -2063,7 +2063,7 @@ end
 event get_cmsg_data
 params
     os      @IN  : OS
-    current @IN  : Process
+    current @IN  : Process // текущий процесс
     reciver @IN  : Socket
     msg     @IN  : msghdr*
     flags   @IN  : MsgFlags
@@ -2073,17 +2073,17 @@ function
     def cmsg_copied : Nat := 0
 
     while (cmsg != to_cmsghdr_pointer(NULL)) {
-        if (cmsg->cmsg_type == SCM_RIGHTS) {
-            going_to_copy = min(cmsg->cmsg_len, msg->msg_controllen - cmsg_copied)                   
+        if (cmsg->cmsg_type == SCM_RIGHTS) { // дополнительное сообщение передаёт файловые дескрипторы (cmsg->cmsg_type = SCM_RIGHTS)
+            going_to_copy = min(cmsg->cmsg_len, msg->msg_controllen - cmsg_copied)
             data_bytes = max(going_to_copy - sizeof('cmsghdr'), 0)
             fds_to_pass = data_bytes / sizeof('Int')
             
-            if (fds_to_pass != \len(buf.of_arr)) {
+            if (fds_to_pass < \len(buf.of_arr)) { // число принимаемых файловых дескрипторов меньше чем число переданных
                 add_to_set(msg->msg_flags, MSG_CTRUNC)
             }
             
             if (fds_to_pass > 0) {
-                memcpy(to_void_pointer(msg->msg_control) + cmsg_copied, to_void_pointer(cmsg->cmsg_data), sizeof('cmsghdr')) // copy header
+                memcpy(to_void_pointer(to_char_pointer(msg->msg_control) + cmsg_copied), to_void_pointer(cmsg->cmsg_data), sizeof('cmsghdr')) // Скопировать заголовок дополнительных данных
                 cmsg_copied := cmsg_copied + sizeof('cmsghdr')
                          
                 for (k1 in [0..fds_to_pass]) {
@@ -2094,11 +2094,11 @@ function
                         current.proc_fds(fd).fd_flags := {. FD_CLOEXEC .}
                     }
                     
-                    * memcpy(msg->cmsg_control + cmsg_copied, &fd, sizeof('Int'))
+                    \deref(to_int_pointer(to_char_pointer(msg->msg_control) + cmsg_copied)) := fd 
                     cmsg_copied := cmsg_copied + sizeof('Int')
                 }
             }        
-        } elif (cmsg->cmsg_type == SCM_CREDENTIALS && SO_PASSCRED \isin reciver.socket_flags) {
+        } elif (cmsg->cmsg_type == SCM_CREDENTIALS && SO_PASSCRED \isin reciver.socket_flags) { # cmsg->cmsg_type = SCM_CREDENTIALS и SO_PASSCRED ∈ reciver.socket_flags  
             if (cmsg->cmsg_len > msg->msg_controllen - cmsg_copied) {
                 add_to_set(msg->msg_flags, MSG_CTRUNC)
             } else {
@@ -2126,7 +2126,7 @@ end
 event get_data
 params
     os      @IN  : OS
-    current @IN  : Process
+    current @IN  : Process // текущий процесс
     reciver @IN  : Socket
     msg     @IN  : msghdr*
     flags   @IN  : MsgFlags
@@ -2517,7 +2517,7 @@ end
 event getsockname // вызов функции getsockname
 params
     os      @IN  : OS
-    current @IN  : Process
+    current @IN  : Process // текущий процесс
     sockfd  @IN  : Nat
     address @IN  : sockaddr_un*
     addrlen @IN  : Nat*
