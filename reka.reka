@@ -1611,7 +1611,7 @@ end
 
 event load_data
 params
-    current @IN  : Process
+    current @IN  : Process // текущий процесс
     msg     @IN  : msghdr*
     sender  @IN  : Socket
     reciver @IN  : Socket
@@ -2069,7 +2069,6 @@ params
     flags   @IN  : MsgFlags
     buf     @IN  : sk_buff  
 function
-    //Если есть дополнительные данные, они загружаются
     def cmsg : cmsghdr* := to_cmsghdr_pointer(buf.buf_control_data)
     def cmsg_copied : Nat := 0
 
