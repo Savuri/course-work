@@ -1058,7 +1058,7 @@ function
 
     if (socket.socket_type == SOCK_STREAM || socket.socket_type == SOCK_SEQPACKET) {
         socket.socket_status := CONNECTING
-        current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение S.
+        current.proc_status := S //! Установить атрибуту proc_status текущего процесса значение S.
         
         wait INFWAIT { // состояние ожидания появления места для постановки в очередь на подключение
             trigger (is_free_space_in_backlog(server)) { // появления места для постановки в очередь на подключение
@@ -1073,7 +1073,7 @@ function
             }
         }
         
-        current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение S.
+        current.proc_status := S //! Установить атрибуту proc_status текущего процесса значение S.
         
         wait INFWAIT { // состояние ожидания принятия запроса на подключение сервером
             trigger (was_accepted(server, socket)) { // принятия запроса на подключение сервером
@@ -1144,7 +1144,7 @@ function
 
     socket = get_sock_data(current, sockfd)
     socket.socket_status := LISTENING
-    current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение S.
+    current.proc_status := S //! Установить атрибуту proc_status текущего процесса значение S.
     
     wait INFWAIT { // состояние ожидания после вызова функции accept4
         trigger (backlog_is_not_empty(socket)) { // появления запроса на подключение
@@ -1226,7 +1226,7 @@ function
 
     socket = get_sock_data(current, sockfd)
     socket.socket_status := LISTENING
-    current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение S.
+    current.proc_status := S //! Установить атрибуту proc_status текущего процесса значение S.
     
     wait INFWAIT { // состояние ожидания после вызова функции accept
         trigger (backlog_is_not_empty(socket)) { // появления запроса на подключение
@@ -1804,7 +1804,7 @@ function
         other = socket.socket_peer
     }
 
-    current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение S.
+    current.proc_status := S //! Установить атрибуту proc_status текущего процесса значение S.
     wait INFWAIT { // состояние ожидания после вызова функции отправки данных по сокету
         trigger (is_possible_to_load_data(socket, other)) { // произошло освобождение места в буффере отправителя
             current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
@@ -2261,7 +2261,7 @@ params
 function
     socket = get_sock_data(current, sockfd)
     
-    current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение S.
+    current.proc_status := S //! Установить атрибуту proc_status текущего процесса значение S.
     wait INFWAIT { // состояние ожидания после вызова функции получения данных из сокета
         trigger (msg_have_come(socket)) { // появилось сообщения для считывания в буффере
             current.proc_status := R //! Установить атрибуту proc_status текущего процесса значение R.
@@ -2449,12 +2449,14 @@ end
 
 
 
-action truncate_address // Заполнить всю структуру нулями. 
+action truncate_address
 params
-    addr    @IN : sockaddr_un-ref
+    addr     @IN : sockaddr_un*
+    addr_len @IN : Nat
 function
-    * Заполнить всю структуру нулями.
+    * Заполнить всю структуру addr с размером addr_len нулями
 end
+
 
 function getpeername is
 /**
@@ -2472,7 +2474,7 @@ params
     os      @IN  : OS
     current @IN  : Process
     sockfd  @IN  : Nat
-    address @IN  : sockaddr_un-ref
+    address @IN  : sockaddr_un*
     addrlen @IN  : Nat*
     ret     @OUT : Int
 function
@@ -2491,7 +2493,7 @@ function
         address->sun_family := AF_UNIX
         address->sun_path := to_char_arr(socket.socket_peer.socket_name)
     } else { # Buffer is too small
-        truncate_address(address) # Truncate address
+        truncate_address(address, \deref(addrlen)) # Truncate address
     }
     
     \deref(addrlen) := socket_addrlen
@@ -2518,7 +2520,7 @@ params
     os      @IN  : OS
     current @IN  : Process
     sockfd  @IN  : Nat
-    address @IN  : sockaddr_un-ref
+    address @IN  : sockaddr_un*
     addrlen @IN  : Nat*
     ret     @OUT : Int
 function
@@ -2537,7 +2539,7 @@ function
         address->sun_family := AF_UNIX
         address->sun_path := to_char_arr(socket.socket_name)
     } else { // Buffer is too small
-        truncate_address(address) 
+        truncate_address(address, \deref(addrlen)) 
     }
     
     \deref(addrlen) := socket_addrlen
@@ -2796,7 +2798,7 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    address  @IN  : sockaddr_un-ref
+    address  @IN  : sockaddr_un*
     addrlen  @IN  : Nat*
     ret      @OUT : Error-set
 function
@@ -2818,7 +2820,7 @@ params
     os       @IN  : OS
     current  @IN  : Process
     sockfd   @IN  : Nat
-    address  @IN  : sockaddr_un-ref
+    address  @IN  : sockaddr_un*
     addrlen  @IN  : Nat*
     ret      @OUT : Error-set
 function
